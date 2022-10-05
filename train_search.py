@@ -29,13 +29,9 @@ from module.estimator.population import Population
 from module.estimator.predictor import Predictor, weighted_loss
 from module.estimator.utils import GraphPreprocessor
 from module.model_search import Network
-from utils import gumbel_like, gpu_usage
-
-from module.resnet import resnet18, resnet34, resnet50, resnet110
-from module.loss import LossFunc
+from utils import gumbel_like, gpu_usage, DimensionImportanceWeight
 
 CIFAR_CLASSES = 10
-
 
 
 def main():
@@ -44,16 +40,22 @@ def main():
         sys.exit(1)
 
     # enable GPU and set random seeds
-    np.random.seed(args.seed)  # set random seed: numpy
+    np.random.seed(args.seed)                  # set random seed: numpy
     torch.cuda.set_device(args.gpu)
 
+    # NOTE: "deterministic" and "benchmark" are set for reproducibility
+    # such settings have impacts on efficiency
+    # for speed test, disable "deterministic" and enable "benchmark"
+    # reproducible search
+    # cudnn.deterministic = True
+    # cudnn.benchmark = False
     # fast search
     cudnn.deterministic = False
     cudnn.benchmark = True
 
-    torch.manual_seed(args.seed)  # set random seed: torch
-    cudnn.enabled = True
-    torch.cuda.manual_seed(args.seed)  # set random seed: torch.cuda
+    torch.manual_seed(args.seed)               # set random seed: torch
+    cudnn.enabled=True
+    torch.cuda.manual_seed(args.seed)          # set random seed: torch.cuda
     logging.info('gpu device = %d' % args.gpu)
     logging.info("args = %s", args)
     if len(unknown_args) > 0:
@@ -66,7 +68,8 @@ def main():
 
     # build the model with model_search.Network
     logging.info("init arch param")
-    model = resnet50(num_classes=CIFAR_CLASSES)
+    model = Network(C=args.init_channels, num_classes=CIFAR_CLASSES,
+                    layers=args.layers, criterion=criterion, tau=args.tau)
     model = model.to('cuda')
     logging.info("model param size = %fMB", utils.count_parameters_in_MB(model))
     log_genotype(model)
@@ -359,7 +362,7 @@ def predictor_train(architect, memory, unsupervised=False):
 
 
 def architecture_search(train_queue, valid_queue, model, architect, criterion, optimizer, memory,
-                        diw: Optional[DimensionImportanceWeight] = None):
+                        diw: Optional[DimensionImportanceWeight]=None):
     # -- train model --
     if diw is not None and diw.num > 0:
         diw_normal, diw_reduce = diw.get_diw()  # diw weight
