@@ -42,7 +42,7 @@ class Architect(object):
 
         # predictor optimization
         self.predictor_optimizer = torch.optim.Adam(
-            self.predictor.predictor.parameters(), lr=pred_learning_rate, betas=(0.5, 0.999)
+            self.predictor.parameters(), lr=pred_learning_rate, betas=(0.5, 0.999)
         )
         self.predictor_criterion = predictor_criterion
 
