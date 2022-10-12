@@ -4,7 +4,6 @@ import logging
 import os
 import sys
 import time
-from typing import Optional
 
 import numpy as np
 import torch
@@ -28,14 +27,12 @@ from module.estimator.memory import Memory
 from module.estimator.population import Population
 from module.estimator.predictor import Predictor, weighted_loss
 from module.estimator.utils import GraphPreprocessor
-from module.model_search import Network
 from utils import gumbel_like, gpu_usage
 
 from module.resnet import resnet18, resnet34, resnet50, resnet110
 from module.loss import LossFunc
 
 CIFAR_CLASSES = 10
-
 
 
 def main():
@@ -60,18 +57,14 @@ def main():
         logging.warning('unknown_args: %s' % unknown_args)
     else:
         logging.info('unknown_args: %s' % unknown_args)
-    # use cross entropy as loss function
-    criterion = nn.CrossEntropyLoss()
-    criterion = criterion.to('cuda')
+    # Loss Function Search
+
 
     # build the model with model_search.Network
     logging.info("init arch param")
     model = resnet50(num_classes=CIFAR_CLASSES)
     model = model.to('cuda')
     logging.info("model param size = %fMB", utils.count_parameters_in_MB(model))
-    log_genotype(model)
-
-    diw = DimensionImportanceWeight(model=model, v_type='mean') if args.diw else None
 
     # use SGD to optimize the model (optimize model.parameters())
     optimizer = torch.optim.SGD(
@@ -107,14 +100,23 @@ def main():
     # learning rate scheduler (with cosine annealing)
     scheduler = CosineAnnealingLR(optimizer, int(args.epochs), eta_min=args.learning_rate_min)
 
+
+    lfs = LossFunc(operator_size=args.operator_size,
+                   model=model, momentum=args.momentum, weight_decay=args.weight_decay,
+                   arch_learning_rate=args.arch_learning_rate, arch_weight_decay=args.arch_weight_decay,
+                   predictor=predictor, pred_learning_rate=args.pred_learning_rate,
+                   architecture_criterion=F.mse_loss, predictor_criterion=predictor_criterion,
+                   is_gae=is_gae, reconstruct_criterion=reconstruct_criterion, preprocessor=preprocessor
+                   )
+
     # construct architect with architect.Architect
-    _, feature_num = torch.cat(model.arch_parameters()).shape
     if args.predictor_type == 'lstm':
         is_gae = False
         # -- preprocessor --
         preprocessor = None
         # -- build model --
-        predictor = Predictor(input_size=feature_num, hidden_size=args.predictor_hidden_state)
+        predictor = Predictor(input_size=lfs.operation_size + lfs.operater_size,
+                              hidden_size=args.predictor_hidden_state)
         predictor = predictor.to('cuda')
         reconstruct_criterion = None
     elif args.predictor_type == 'gae':
@@ -175,16 +177,16 @@ def main():
         warm_up_gumbel = []
         # assert args.warm_up_population >= args.predictor_batch_size
         for epoch in range(args.warm_up_population):
-            g_normal = gumbel_like(model.alphas_normal)
-            g_reduce = gumbel_like(model.alphas_reduce)
-            warm_up_gumbel.append((g_normal, g_reduce))
+            g_operation = gumbel_like(lfs.alphas_operation)
+            g_operator = gumbel_like(lfs.alphas_operator)
+            warm_up_gumbel.append((g_operation, g_operator))
         utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel-warm-up.pickle'))
         # 1.1.2 warm up
         for epoch, gumbel in enumerate(warm_up_gumbel):
             logging.info('[warm-up model] epoch %d/%d', epoch + 1, args.warm_up_population)
             # warm-up
-            model.g_normal, model.g_reduce = gumbel
-            objs, top1, top5 = model_train(train_queue, model, criterion, optimizer, name='warm-up model')
+            lfs.g_operation, lfs.g_operator = gumbel
+            objs, top1, top5 = model_train(train_queue, model, lfs, optimizer, name='warm-up model')
             logging.info('[warm-up model] epoch %d/%d overall loss=%.4f top1-acc=%.4f top5-acc=%.4f',
                          epoch + 1, args.warm_up_population, objs, top1, top5)
             # save weights
@@ -204,23 +206,25 @@ def main():
     else:
         for epoch, gumbel in enumerate(warm_up_gumbel):
             # re-sample Gumbel distribution
-            model.g_normal, model.g_reduce = gumbel
+            lfs.g_operation, lfs.g_operator = gumbel
             # train model for one step
-            objs, top1, top5 = model_train(train_queue, model, criterion, optimizer, name='build memory')
+            objs, top1, top5 = model_train(train_queue, model, lfs, optimizer, name='build memory')
             logging.info('[build memory] train model-%03d loss=%.4f top1-acc=%.4f',
                          epoch + 1, objs, top1)
             # valid model
-            objs, top1, top5 = model_valid(valid_queue, model, criterion, name='build memory')
+            objs, top1, top5, ece, nll = model_valid(valid_queue, model, lfs, name='build memory')
             logging.info('[build memory] valid model-%03d loss=%.4f top1-acc=%.4f',
                          epoch + 1, objs, top1)
             # save to memory
             if args.evolution:
-                memory.append(individual=[(model.alphas_normal.detach().clone(), model.g_normal.detach().clone()),
-                                          (model.alphas_reduce.detach().clone(), model.g_reduce.detach().clone())],
+                memory.append(individual=[(model.alphas_operation.detach().clone(), lfs.g_operation.detach().clone()),
+                                          (model.alphas_reduce.detach().clone(), lfs.g_operator.detach().clone())],
                               fitness=torch.tensor(objs, dtype=torch.float32).to('cuda'))
             else:
                 memory.append(weights=[w.detach() for w in model.arch_weights(cat=False)],
-                              loss=torch.tensor(objs, dtype=torch.float32).to('cuda'))
+                              nll=torch.tensor(nll, dtype=torch.float32).to('cuda'),
+                              acc=torch.tensor(top1, dtype=torch.float32).to('cuda'),
+                              ece=torch.tensor(ece, dtype=torch.float32).to('cuda'))
             # checkpoint: model, memory
             utils.save(model, os.path.join(args.save, 'model-weights-valid.pt'))
             utils.pickle_save(memory.state_dict(),
@@ -233,11 +237,11 @@ def main():
         logging.info('Load extractor from %s', args.load_extractor)
         architect.predictor.extractor.load_state_dict(torch.load(args.load_extractor)['weights'])
 
-    architect.predictor.train()
+    predictor.train()
     for epoch in range(args.predictor_warm_up):
         epoch += 1
         # warm-up
-        p_loss, p_true, p_pred = predictor_train(architect, memory)
+        p_loss, p_true, p_pred = predictor_train(lfs, memory)
         if epoch % args.report_freq == 0 or epoch == args.predictor_warm_up:
             logging.info('[warm-up predictor] epoch %d/%d loss=%.4f', epoch, args.predictor_warm_up, p_loss)
             logging.info('\np-true: %s\np-pred: %s', p_true.data, p_pred.data)
@@ -257,7 +261,7 @@ def main():
         logging.info('[architecture search] epoch %d/%d lr %e', epoch + 1, args.epochs, lr)
         # search
         objs, top1, top5, objp = architecture_search(train_queue, valid_queue, model, architect,
-                                                     criterion, optimizer, memory, diw=diw)
+                                                     lfs, optimizer, memory)
         # save weights
         utils.save(model, os.path.join(args.save, 'model-weights-search.pt'))
         # log genotype
@@ -271,15 +275,15 @@ def main():
         gpu_usage()
 
 
-def log_genotype(model):
+def log_genotype(lfs):
     # log genotype (i.e. alpha)
-    genotype = model.genotype()
+    genotype = lfs.genotype()
     logging.info('genotype = %s', genotype)
-    logging.info('alphas_normal: %s\n%s', torch.argmax(model.alphas_normal, dim=-1), model.alphas_normal)
-    logging.info('alphas_reduce: %s\n%s', torch.argmax(model.alphas_reduce, dim=-1), model.alphas_reduce)
+    logging.info('alphas_normal: %s\n%s', torch.argmax(lfs.alphas_operation, dim=-1), lfs.alphas_operation)
+    logging.info('alphas_reduce: %s\n%s', torch.argmax(lfs.alphas_operator, dim=-1), lfs.alphas_operator)
 
 
-def model_train(train_queue, model, criterion, optimizer, name):
+def model_train(train_queue, model, lfs, optimizer, name):
     # set model to training model
     model.train()
     # create metrics
@@ -297,7 +301,7 @@ def model_train(train_queue, model, criterion, optimizer, name):
         # forward
         optimizer.zero_grad()
         logits = model(x)
-        loss = criterion(logits, target)
+        loss = lfs(logits, target)
         # backward
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -314,7 +318,7 @@ def model_train(train_queue, model, criterion, optimizer, name):
     return objs.avg, top1.avg, top5.avg
 
 
-def model_valid(valid_queue, model, criterion, name):
+def model_valid(valid_queue, model, lfs, name):
     # set model to evaluation model
     model.eval()
     # create metrics
@@ -330,7 +334,7 @@ def model_valid(valid_queue, model, criterion, name):
         target = target.to('cuda', non_blocking=True).requires_grad_(False)
         # valid model
         logits = model(x)
-        loss = criterion(logits, target)
+        loss = lfs(logits, target)
         prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
         # update metrics
         objs.update(loss.data.item(), n)
@@ -358,30 +362,20 @@ def predictor_train(architect, memory, unsupervised=False):
     return objs.avg, torch.cat(all_y), torch.cat(all_p)
 
 
-def architecture_search(train_queue, valid_queue, model, architect, criterion, optimizer, memory,
-                        diw: Optional[DimensionImportanceWeight] = None):
+def architecture_search(train_queue, valid_queue, model, architect, lfs, optimizer, memory):
     # -- train model --
-    if diw is not None and diw.num > 0:
-        diw_normal, diw_reduce = diw.get_diw()  # diw weight
-        gsw_normal = 1. - diw_normal  # gumbel sampling weight
-        gsw_reduce = 1. - diw_reduce  # gumbel sampling weight
-    else:
-        gsw_normal, gsw_reduce = 1., 1.  # gumbel sampling weight
-    # logging.debug('gsw_normal:\n%s' % gsw_normal)
-    # logging.debug('gsw_reduce:\n%s' % gsw_reduce)
-    model.g_normal = gumbel_like(model.alphas_normal) * gsw_normal
-    model.g_reduce = gumbel_like(model.alphas_reduce) * gsw_reduce
-    # logging.debug('g_normal:\n%s' % model.g_normal)
-    # logging.debug('g_reduce:\n%s' % model.g_reduce)
+    gsw_normal, gsw_reduce = 1., 1.  # gumbel sampling weight
+    lfs.g_operation = gumbel_like(model.alphas_operation) * gsw_normal
+    lfs.g_operator = gumbel_like(model.alphas_reduce) * gsw_reduce
     # train model for one step
-    model_train(train_queue, model, criterion, optimizer, name='build memory')
+    model_train(train_queue, model, lfs, optimizer, name='build memory')
     # -- valid model --
-    objs, top1, top5 = model_valid(valid_queue, model, criterion, name='build memory')
+    objs, top1, top5 = model_valid(valid_queue, model, lfs, name='build memory')
     # save validation to memory
     logging.info('[architecture search] append memory objs=%.4f top1-acc=%.4f top5-acc=%.4f', objs, top1, top5)
     if args.evolution:
-        memory.append(individual=[(model.alphas_normal.detach().clone(), model.g_normal.detach().clone()),
-                                  (model.alphas_reduce.detach().clone(), model.g_reduce.detach().clone())],
+        memory.append(individual=[(model.alphas_operation.detach().clone(), lfs.g_operation.detach().clone()),
+                                  (model.alphas_reduce.detach().clone(), lfs.g_operator.detach().clone())],
                       fitness=torch.tensor(objs, dtype=torch.float32).to('cuda'))
         index = memory.remove('highest')
         logging.info('[evolution] %d is removed (population size: %d).' % (index, len(memory)))
@@ -404,25 +398,9 @@ def architecture_search(train_queue, valid_queue, model, architect, criterion, o
                  p_loss, p_true.data, p_pred.data)
     logging.info('kendall\'s-tau=%.4f' % k_tau)
 
-    # -- architecture update --
-    if args.evolution:
-        index, weights, _ = memory.select('lowest')
-        logging.info('[evolution] %d is selected (population size: %d).' % (index, len(memory)))
-        (a_normal, g_normal), (a_reduce, g_reduce) = weights
-        # TODO: detach and copy
-        model.alphas_normal.data = a_normal
-        model.alphas_reduce.data = a_reduce
-        model.g_normal = g_normal
-        model.g_reduce = g_reduce
     architect.step()
     # log
     logging.info('[architecture search] update architecture')
-
-    if diw is not None:
-        diw.update()
-        diw_normal, diw_reduce = diw.get_diw()
-        logging.info('diw_normal: %s' % (diw_normal,))
-        logging.info('diw_reduce: %s' % (diw_reduce,))
 
     return objs, top1, top5, p_loss
 
@@ -480,14 +458,13 @@ if __name__ == '__main__':
     parser.add_argument('--num_layers', type=int, default=5)
     parser.add_argument('--num_mlp_layers', type=int, default=2)
     parser.add_argument('--dropout', type=float, default=0.3)
-    # parser.add_argument('--threshold', type=float, default=0.5)  # TODO: unused arg
-    # optimization
-    # parser.add_argument('--lr', type=float, default=1e-3)  # TODO: unused arg
-    # parser.add_argument('--eps', type=float, default=1e-8)  # TODO: unused arg
-    # parser.add_argument('--supervised', action='store_true', default=False)  # TODO: unused arg
+
     # data
     parser.add_argument('--preprocess_mode', type=int, default=4)
     parser.add_argument('--preprocess_lamb', type=float, default=0.)
+
+    # loss function search
+    parser.add_argument('--operator_size', type=int, default=8)
 
     args, unknown_args = parser.parse_known_args()
 

@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 from torch.nn import functional as F
 
@@ -12,18 +13,97 @@ def _concat(xs):
     return torch.cat([x.view(-1) for x in xs])
 
 
+class LossLayer(nn.Module):
+    '''
+    https://github.com/melodyguan/enas/blob/master/src/cifar10/general_child.py#L245
+    '''
+
+    def __init__(self, layer_id, in_planes, out_planes, epsilon=1e-6):
+        super(LossLayer, self).__init__()
+
+        self.layer_id = layer_id
+        self.in_planes = in_planes
+        self.out_planes = out_planes
+
+        self.branch_0 = nn.Identity()
+        self.branch_1 = nn.Sigmoid()
+        self.branch_2 = nn.Tanh()
+        self.branch_3 = nn.ReLU()
+        self.epsilon = epsilon
+
+    def forward(self, prev_layers, sample_arc, small_epsilon=False):
+        layer_type = sample_arc[0]
+        if self.layer_id > 0:
+            skip_indices = sample_arc[1]
+        else:
+            skip_indices = []
+        out = []
+        for i, skip in enumerate(skip_indices):
+            if skip != 1:
+                out.append(prev_layers[i].reshape(-1, 1))
+        out = torch.cat(out, 1).cuda()
+        epsilon = 1e-6 if small_epsilon else self.epsilon
+        if layer_type == 0:
+            out = torch.sum(out, dim=1)
+        elif layer_type == 1:
+            out = torch.prod(out, dim=1)
+        elif layer_type == 2:
+            out = torch.max(out, dim=1)[0]
+        elif layer_type == 3:
+            out = torch.min(out, dim=1)[0]
+        elif layer_type == 4:
+            out = - out
+        elif layer_type == 5:
+            out = self.branch_0(out)
+        elif layer_type == 6:
+            out = torch.sign(out) * torch.log(torch.abs(out) + epsilon)
+        elif layer_type == 7:
+            out = (out) ** 2
+        elif layer_type == 8:
+            out = torch.sign(out) / (torch.abs(out) + epsilon)
+        # The following operators are defined but not used
+        elif layer_type == 9:
+            out = self.branch_1(out)
+        elif layer_type == 10:
+            out = self.branch_2(out)
+        elif layer_type == 11:
+            out = self.branch_3(out)
+        elif layer_type == 12:
+            out = torch.abs(out)
+        elif layer_type == 13:
+            out = torch.sign(out) * torch.sqrt(torch.abs(out) + epsilon)
+        elif layer_type == 14:
+            out = torch.exp(out)
+        else:
+            raise ValueError("Unknown layer_type {}".format(layer_type))
+        out = torch.clamp(out, min=1e-5, max=1e5)
+
+        return out
+
+
+
+
 class LossFunc(object):
 
-    def __init__(self, model, momentum, weight_decay,
+    def __init__(self, operator_size, model, momentum, weight_decay,
                  arch_learning_rate, arch_weight_decay,
                  predictor, pred_learning_rate,
                  architecture_criterion=F.mse_loss,
                  predictor_criterion=F.mse_loss,
                  is_gae=False,
                  reconstruct_criterion=None,
-                 preprocessor=None):
+                 preprocessor=None,
+                 num_nodes=14):
         self.network_momentum = momentum
         self.network_weight_decay = weight_decay
+
+        # LFS
+        self.operator_size = operator_size
+        self.num_nodes = num_nodes
+        self.alphas_operation = None
+        self.alphas_operator = None
+        self.g_operation = None
+        self.g_operator = None
 
         # models
         self.model = model
@@ -50,11 +130,12 @@ class LossFunc(object):
         loss = self.model._loss(input, target)
         theta = _concat(self.model.parameters()).data
         try:
-            moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.parameters()).mul_(self.network_momentum)
+            moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.parameters()).mul_(
+                self.network_momentum)
         except:
             moment = torch.zeros_like(theta)
-        dtheta = _concat(torch.autograd.grad(loss, self.model.parameters())).data + self.network_weight_decay*theta
-        unrolled_model = self._construct_model_from_theta(theta.sub(eta, moment+dtheta))
+        dtheta = _concat(torch.autograd.grad(loss, self.model.parameters())).data + self.network_weight_decay * theta
+        unrolled_model = self._construct_model_from_theta(theta.sub(eta, moment + dtheta))
         return unrolled_model
 
     def predictor_step(self, x, y, unsupervised=False):
@@ -132,7 +213,7 @@ class LossFunc(object):
         return loss
 
     def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer):
-        unrolled_model = self._compute_unrolled_model(input_train, target_train, eta,  network_optimizer)
+        unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer)
         unrolled_loss = unrolled_model._loss(input_valid, target_valid)
 
         unrolled_loss.backward()
@@ -156,7 +237,7 @@ class LossFunc(object):
         params, offset = {}, 0
         for k, v in self.model.named_parameters():
             v_length = np.prod(v.size())
-            params[k] = theta[offset: offset+v_length].view(v.size())
+            params[k] = theta[offset: offset + v_length].view(v.size())
             offset += v_length
 
         assert offset == len(theta)
@@ -172,12 +253,11 @@ class LossFunc(object):
         grads_p = torch.autograd.grad(loss, self.model.arch_parameters())
 
         for p, v in zip(self.model.parameters(), vector):
-            p.data.sub_(2*R, v)
+            p.data.sub_(2 * R, v)
         loss = self.model._loss(input, target)
         grads_n = torch.autograd.grad(loss, self.model.arch_parameters())
 
         for p, v in zip(self.model.parameters(), vector):
             p.data.add_(R, v)
 
-        return [(x-y).div_(2*R) for x, y in zip(grads_p, grads_n)]
-
+        return [(x - y).div_(2 * R) for x, y in zip(grads_p, grads_n)]

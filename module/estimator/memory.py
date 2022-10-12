@@ -59,7 +59,7 @@ class Memory(object):
                 batch.append((torch.stack(weights), torch.stack(loss)))
         return batch
 
-    def append(self, weights, loss):
+    def append(self, weights, loss, nll, acc, ece):
         self.memory.append(Experience(weights=weights, loss=loss))
 
     def state_dict(self):
