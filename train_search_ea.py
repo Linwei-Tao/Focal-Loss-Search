@@ -29,8 +29,6 @@ from module.estimator.utils import GraphPreprocessor
 from module.model_search import Network
 from utils import gumbel_like, gpu_usage
 
-from module.resnet import resnet18, resnet34, resnet50, resnet110
-
 CIFAR_CLASSES = 10
 
 
@@ -43,6 +41,12 @@ def main():
     np.random.seed(args.seed)                  # set random seed: numpy
     torch.cuda.set_device(args.gpu)
 
+    # NOTE: "deterministic" and "benchmark" are set for reproducibility
+    # such settings have impacts on efficiency
+    # for speed test, disable "deterministic" and enable "benchmark"
+    # reproducible search
+    # cudnn.deterministic = True
+    # cudnn.benchmark = False
     # fast search
     cudnn.deterministic = False
     cudnn.benchmark = True
@@ -62,7 +66,8 @@ def main():
 
     # build the model with model_search.Network
     logging.info("init arch param")
-    model = resnet50(num_classes=CIFAR_CLASSES)
+    model = Network(C=args.init_channels, num_classes=CIFAR_CLASSES,
+                    layers=args.layers, criterion=criterion, tau=args.tau)
     model = model.to('cuda')
     logging.info("model param size = %fMB", utils.count_parameters_in_MB(model))
     log_genotype(model)
@@ -143,7 +148,7 @@ def main():
         logging.info('using MSE loss for predictor')
         predictor_criterion = F.mse_loss
 
-    loss_architect = Architect(
+    architect = Architect(
         model=model, momentum=args.momentum, weight_decay=args.weight_decay,
         arch_learning_rate=args.arch_learning_rate, arch_weight_decay=args.arch_weight_decay,
         predictor=predictor, pred_learning_rate=args.pred_learning_rate,

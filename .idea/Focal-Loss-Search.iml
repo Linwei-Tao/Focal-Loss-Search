@@ -2,7 +2,7 @@
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$" />
-    <orderEntry type="jdk" jdkName="Lab1" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Remote Python 3.9.13 (sftp://linwei@lab1.taolinwei.com:22/home/linwei/anaconda3/envs/focal_loss_search/bin/python3)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">
