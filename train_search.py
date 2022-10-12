@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, SubsetRandomSampler
 from torchvision.datasets import CIFAR10
 
 import utils
-from module.architect import Architect
+from module.architect import LFS
 from module.estimator.estimator import Estimator, PredictorForGraph
 from module.estimator.gnn.decoder import LinearDecoder
 from module.estimator.gnn.encoder import GINEncoder
@@ -59,7 +59,6 @@ def main():
         logging.info('unknown_args: %s' % unknown_args)
     # Loss Function Search
 
-
     # build the model with model_search.Network
     logging.info("init arch param")
     model = resnet50(num_classes=CIFAR_CLASSES)
@@ -100,14 +99,7 @@ def main():
     # learning rate scheduler (with cosine annealing)
     scheduler = CosineAnnealingLR(optimizer, int(args.epochs), eta_min=args.learning_rate_min)
 
-
-    lfs = LossFunc(operator_size=args.operator_size,
-                   model=model, momentum=args.momentum, weight_decay=args.weight_decay,
-                   arch_learning_rate=args.arch_learning_rate, arch_weight_decay=args.arch_weight_decay,
-                   predictor=predictor, pred_learning_rate=args.pred_learning_rate,
-                   architecture_criterion=F.mse_loss, predictor_criterion=predictor_criterion,
-                   is_gae=is_gae, reconstruct_criterion=reconstruct_criterion, preprocessor=preprocessor
-                   )
+    lossfunc = LossFunc()
 
     # construct architect with architect.Architect
     if args.predictor_type == 'lstm':
@@ -115,7 +107,7 @@ def main():
         # -- preprocessor --
         preprocessor = None
         # -- build model --
-        predictor = Predictor(input_size=lfs.operation_size + lfs.operater_size,
+        predictor = Predictor(input_size=lossfunc.num_states + lossfunc.num_operator_choice,
                               hidden_size=args.predictor_hidden_state)
         predictor = predictor.to('cuda')
         reconstruct_criterion = None
@@ -152,11 +144,11 @@ def main():
         logging.info('using MSE loss for predictor')
         predictor_criterion = F.mse_loss
 
-    architect = Architect(
-        model=model, momentum=args.momentum, weight_decay=args.weight_decay,
-        arch_learning_rate=args.arch_learning_rate, arch_weight_decay=args.arch_weight_decay,
+    lfs = LFS(
+        lossfunc=lossfunc, model=model, momentum=args.momentum, weight_decay=args.weight_decay,
+        lfs_learning_rate=args.lfs_learning_rate, lfs_weight_decay=args.lfs_weight_decay,
         predictor=predictor, pred_learning_rate=args.pred_learning_rate,
-        architecture_criterion=F.mse_loss, predictor_criterion=predictor_criterion,
+        lfs_criterion=F.mse_loss, predictor_criterion=predictor_criterion,
         is_gae=is_gae, reconstruct_criterion=reconstruct_criterion, preprocessor=preprocessor
     )
 
@@ -177,16 +169,16 @@ def main():
         warm_up_gumbel = []
         # assert args.warm_up_population >= args.predictor_batch_size
         for epoch in range(args.warm_up_population):
-            g_operation = gumbel_like(lfs.alphas_operation)
-            g_operator = gumbel_like(lfs.alphas_operator)
-            warm_up_gumbel.append((g_operation, g_operator))
+            g_ops = gumbel_like(lossfunc.alphas_ops)
+            g_operator = gumbel_like(lossfunc.alphas_operators)
+            warm_up_gumbel.append((g_ops, g_operator))
         utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel-warm-up.pickle'))
         # 1.1.2 warm up
         for epoch, gumbel in enumerate(warm_up_gumbel):
             logging.info('[warm-up model] epoch %d/%d', epoch + 1, args.warm_up_population)
             # warm-up
-            lfs.g_operation, lfs.g_operator = gumbel
-            objs, top1, top5 = model_train(train_queue, model, lfs, optimizer, name='warm-up model')
+            lossfunc.g_operation, lossfunc.g_operator = gumbel
+            objs, top1, top5 = model_train(train_queue, model, lossfunc, optimizer, name='warm-up model')
             logging.info('[warm-up model] epoch %d/%d overall loss=%.4f top1-acc=%.4f top5-acc=%.4f',
                          epoch + 1, args.warm_up_population, objs, top1, top5)
             # save weights
@@ -206,19 +198,19 @@ def main():
     else:
         for epoch, gumbel in enumerate(warm_up_gumbel):
             # re-sample Gumbel distribution
-            lfs.g_operation, lfs.g_operator = gumbel
+            lossfunc.g_operation, lossfunc.g_operator = gumbel
             # train model for one step
-            objs, top1, top5 = model_train(train_queue, model, lfs, optimizer, name='build memory')
+            objs, top1, top5 = model_train(train_queue, model, lossfunc, optimizer, name='build memory')
             logging.info('[build memory] train model-%03d loss=%.4f top1-acc=%.4f',
                          epoch + 1, objs, top1)
             # valid model
-            objs, top1, top5, ece, nll = model_valid(valid_queue, model, lfs, name='build memory')
+            objs, top1, top5, ece, nll = model_valid(valid_queue, model, lossfunc, name='build memory')
             logging.info('[build memory] valid model-%03d loss=%.4f top1-acc=%.4f',
                          epoch + 1, objs, top1)
             # save to memory
             if args.evolution:
-                memory.append(individual=[(model.alphas_operation.detach().clone(), lfs.g_operation.detach().clone()),
-                                          (model.alphas_reduce.detach().clone(), lfs.g_operator.detach().clone())],
+                memory.append(individual=[(model.alphas_operation.detach().clone(), lossfunc.g_operation.detach().clone()),
+                                          (model.alphas_reduce.detach().clone(), lossfunc.g_operator.detach().clone())],
                               fitness=torch.tensor(objs, dtype=torch.float32).to('cuda'))
             else:
                 memory.append(weights=[w.detach() for w in model.arch_weights(cat=False)],
@@ -235,33 +227,32 @@ def main():
     # --- Part 2 predictor warm-up ---
     if args.load_extractor is not None:
         logging.info('Load extractor from %s', args.load_extractor)
-        architect.predictor.extractor.load_state_dict(torch.load(args.load_extractor)['weights'])
+        lfs.predictor.extractor.load_state_dict(torch.load(args.load_extractor)['weights'])
 
     predictor.train()
     for epoch in range(args.predictor_warm_up):
         epoch += 1
         # warm-up
-        p_loss, p_true, p_pred = predictor_train(lfs, memory)
+        p_loss, p_true, p_pred = predictor_train(lossfunc, memory)
         if epoch % args.report_freq == 0 or epoch == args.predictor_warm_up:
             logging.info('[warm-up predictor] epoch %d/%d loss=%.4f', epoch, args.predictor_warm_up, p_loss)
             logging.info('\np-true: %s\np-pred: %s', p_true.data, p_pred.data)
             k_tau = kendalltau(p_true.detach().to('cpu'), p_pred.detach().to('cpu'))[0]
             logging.info('kendall\'s-tau=%.4f' % k_tau)
             # save predictor
-            utils.save(architect.predictor, os.path.join(args.save, 'predictor-warm-up.pt'))
+            utils.save(lfs.predictor, os.path.join(args.save, 'predictor-warm-up.pt'))
     # gpu info
     gpu_usage()
     # log genotype
     log_genotype(model)
 
-    # --- Part 3 architecture search ---
+    # --- Part 3 loss function search ---
     for epoch in range(args.epochs):
         # get current learning rate
         lr = scheduler.get_lr()[0]
-        logging.info('[architecture search] epoch %d/%d lr %e', epoch + 1, args.epochs, lr)
+        logging.info('[loss function search] epoch %d/%d lr %e', epoch + 1, args.epochs, lr)
         # search
-        objs, top1, top5, objp = architecture_search(train_queue, valid_queue, model, architect,
-                                                     lfs, optimizer, memory)
+        objs, top1, top5, objp = search(train_queue, valid_queue, model, lfs, lossfunc, optimizer, memory)
         # save weights
         utils.save(model, os.path.join(args.save, 'model-weights-search.pt'))
         # log genotype
@@ -269,21 +260,21 @@ def main():
         # update learning rate
         scheduler.step()
         # log
-        logging.info('[architecture search] overall loss=%.4f top1-acc=%.4f top5-acc=%.4f predictor_loss=%.4f',
+        logging.info('[loss function search] overall loss=%.4f top1-acc=%.4f top5-acc=%.4f predictor_loss=%.4f',
                      objs, top1, top5, objp)
         # gpu info
         gpu_usage()
 
 
-def log_genotype(lfs):
+def log_genotype(lossfunc):
     # log genotype (i.e. alpha)
-    genotype = lfs.genotype()
+    genotype = lossfunc.genotype()
     logging.info('genotype = %s', genotype)
-    logging.info('alphas_normal: %s\n%s', torch.argmax(lfs.alphas_operation, dim=-1), lfs.alphas_operation)
-    logging.info('alphas_reduce: %s\n%s', torch.argmax(lfs.alphas_operator, dim=-1), lfs.alphas_operator)
+    logging.info('alphas_normal: %s\n%s', torch.argmax(lossfunc.alphas_operation, dim=-1), lossfunc.alphas_operation)
+    logging.info('alphas_reduce: %s\n%s', torch.argmax(lossfunc.alphas_operator, dim=-1), lossfunc.alphas_operator)
 
 
-def model_train(train_queue, model, lfs, optimizer, name):
+def model_train(train_queue, model, lossfunc, optimizer, name):
     # set model to training model
     model.train()
     # create metrics
@@ -301,7 +292,7 @@ def model_train(train_queue, model, lfs, optimizer, name):
         # forward
         optimizer.zero_grad()
         logits = model(x)
-        loss = lfs(logits, target)
+        loss = lossfunc(logits, target)
         # backward
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -318,7 +309,7 @@ def model_train(train_queue, model, lfs, optimizer, name):
     return objs.avg, top1.avg, top5.avg
 
 
-def model_valid(valid_queue, model, lfs, name):
+def model_valid(valid_queue, model, lossfunc, name):
     # set model to evaluation model
     model.eval()
     # create metrics
@@ -334,7 +325,7 @@ def model_valid(valid_queue, model, lfs, name):
         target = target.to('cuda', non_blocking=True).requires_grad_(False)
         # valid model
         logits = model(x)
-        loss = lfs(logits, target)
+        loss = lossfunc(logits, target)
         prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
         # update metrics
         objs.update(loss.data.item(), n)
@@ -362,20 +353,20 @@ def predictor_train(architect, memory, unsupervised=False):
     return objs.avg, torch.cat(all_y), torch.cat(all_p)
 
 
-def architecture_search(train_queue, valid_queue, model, architect, lfs, optimizer, memory):
+def search(train_queue, valid_queue, model, architect, lossfunc, optimizer, memory):
     # -- train model --
     gsw_normal, gsw_reduce = 1., 1.  # gumbel sampling weight
-    lfs.g_operation = gumbel_like(model.alphas_operation) * gsw_normal
-    lfs.g_operator = gumbel_like(model.alphas_reduce) * gsw_reduce
+    lossfunc.g_operation = gumbel_like(model.alphas_operation) * gsw_normal
+    lossfunc.g_operator = gumbel_like(model.alphas_reduce) * gsw_reduce
     # train model for one step
-    model_train(train_queue, model, lfs, optimizer, name='build memory')
+    model_train(train_queue, model, lossfunc, optimizer, name='build memory')
     # -- valid model --
-    objs, top1, top5 = model_valid(valid_queue, model, lfs, name='build memory')
+    objs, top1, top5 = model_valid(valid_queue, model, lossfunc, name='build memory')
     # save validation to memory
-    logging.info('[architecture search] append memory objs=%.4f top1-acc=%.4f top5-acc=%.4f', objs, top1, top5)
+    logging.info('[loss function search] append memory objs=%.4f top1-acc=%.4f top5-acc=%.4f', objs, top1, top5)
     if args.evolution:
-        memory.append(individual=[(model.alphas_operation.detach().clone(), lfs.g_operation.detach().clone()),
-                                  (model.alphas_reduce.detach().clone(), lfs.g_operator.detach().clone())],
+        memory.append(individual=[(model.alphas_operation.detach().clone(), lossfunc.g_operation.detach().clone()),
+                                  (model.alphas_reduce.detach().clone(), lossfunc.g_operator.detach().clone())],
                       fitness=torch.tensor(objs, dtype=torch.float32).to('cuda'))
         index = memory.remove('highest')
         logging.info('[evolution] %d is removed (population size: %d).' % (index, len(memory)))
@@ -394,13 +385,13 @@ def architecture_search(train_queue, valid_queue, model, architect, lfs, optimiz
         p_loss, p_true, p_pred = predictor_train(architect, memory)
         k_tau = kendalltau(p_true.detach().to('cpu'), p_pred.detach().to('cpu'))[0]
         if k_tau > 0.95: break
-    logging.info('[architecture search] train predictor p_loss=%.4f\np-true: %s\np-pred: %s',
+    logging.info('[loss function search] train predictor p_loss=%.4f\np-true: %s\np-pred: %s',
                  p_loss, p_true.data, p_pred.data)
     logging.info('kendall\'s-tau=%.4f' % k_tau)
 
     architect.step()
     # log
-    logging.info('[architecture search] update architecture')
+    logging.info('[loss function search] update architecture')
 
     return objs, top1, top5, p_loss
 
@@ -427,8 +418,8 @@ if __name__ == '__main__':
     parser.add_argument('--drop_path_prob', type=float, default=0.3, help='drop path probability')
     parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
     # search setting
-    parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
-    parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
+    parser.add_argument('--lfs_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
+    parser.add_argument('--lfs_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
     parser.add_argument('--memory_size', type=int, default=100, help='size of memory to train predictor')
     parser.add_argument('--warm_up_population', type=int, default=100, help='warm_up_population')
     parser.add_argument('--load_model', type=str, default=None, help='load model weights from file')

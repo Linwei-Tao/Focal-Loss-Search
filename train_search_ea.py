@@ -150,7 +150,7 @@ def main():
 
     architect = Architect(
         model=model, momentum=args.momentum, weight_decay=args.weight_decay,
-        arch_learning_rate=args.arch_learning_rate, arch_weight_decay=args.arch_weight_decay,
+        lfs_learning_rate=args.lfs_learning_rate, lfs_weight_decay=args.lfs_weight_decay,
         predictor=predictor, pred_learning_rate=args.pred_learning_rate,
         architecture_criterion=F.mse_loss,
         predictor_criterion=predictor_criterion,
@@ -413,8 +413,8 @@ if __name__ == '__main__':
     parser.add_argument('--drop_path_prob', type=float, default=0.3, help='drop path probability')
     parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
     # search setting
-    parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
-    parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
+    parser.add_argument('--lfs_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
+    parser.add_argument('--lfs_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
     parser.add_argument('--memory_size', type=int, default=100, help='size of memory to train predictor')
     parser.add_argument('--warm_up_population', type=int, default=100, help='warm_up_population')
     parser.add_argument('--load_model', type=str, default=None, help='load model weights from file')

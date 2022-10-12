@@ -1,263 +1,215 @@
-import logging
+from typing import Union, List
 
-import numpy as np
 import torch
-import torch.nn as nn
-
-from torch.nn import functional as F
-
-from module.estimator.utils import arch_matrix_to_graph
-
-
-def _concat(xs):
-    return torch.cat([x.view(-1) for x in xs])
-
-
-class LossLayer(nn.Module):
-    '''
-    https://github.com/melodyguan/enas/blob/master/src/cifar10/general_child.py#L245
-    '''
-
-    def __init__(self, layer_id, in_planes, out_planes, epsilon=1e-6):
-        super(LossLayer, self).__init__()
-
-        self.layer_id = layer_id
-        self.in_planes = in_planes
-        self.out_planes = out_planes
-
-        self.branch_0 = nn.Identity()
-        self.branch_1 = nn.Sigmoid()
-        self.branch_2 = nn.Tanh()
-        self.branch_3 = nn.ReLU()
-        self.epsilon = epsilon
-
-    def forward(self, prev_layers, sample_arc, small_epsilon=False):
-        layer_type = sample_arc[0]
-        if self.layer_id > 0:
-            skip_indices = sample_arc[1]
-        else:
-            skip_indices = []
-        out = []
-        for i, skip in enumerate(skip_indices):
-            if skip != 1:
-                out.append(prev_layers[i].reshape(-1, 1))
-        out = torch.cat(out, 1).cuda()
-        epsilon = 1e-6 if small_epsilon else self.epsilon
-        if layer_type == 0:
-            out = torch.sum(out, dim=1)
-        elif layer_type == 1:
-            out = torch.prod(out, dim=1)
-        elif layer_type == 2:
-            out = torch.max(out, dim=1)[0]
-        elif layer_type == 3:
-            out = torch.min(out, dim=1)[0]
-        elif layer_type == 4:
-            out = - out
-        elif layer_type == 5:
-            out = self.branch_0(out)
-        elif layer_type == 6:
-            out = torch.sign(out) * torch.log(torch.abs(out) + epsilon)
-        elif layer_type == 7:
-            out = (out) ** 2
-        elif layer_type == 8:
-            out = torch.sign(out) / (torch.abs(out) + epsilon)
-        # The following operators are defined but not used
-        elif layer_type == 9:
-            out = self.branch_1(out)
-        elif layer_type == 10:
-            out = self.branch_2(out)
-        elif layer_type == 11:
-            out = self.branch_3(out)
-        elif layer_type == 12:
-            out = torch.abs(out)
-        elif layer_type == 13:
-            out = torch.sign(out) * torch.sqrt(torch.abs(out) + epsilon)
-        elif layer_type == 14:
-            out = torch.exp(out)
-        else:
-            raise ValueError("Unknown layer_type {}".format(layer_type))
-        out = torch.clamp(out, min=1e-5, max=1e5)
-
-        return out
+from torch import nn, autograd
+from module.operations import FactorizedReduce, OPS, ReLUConvBN
+from genotypes import Genotype, PRIMITIVES
+from utils import gumbel_like
+from utils import gumbel_softmax_v1 as gumbel_softmax
+from collections import deque
+import torch.nn.functional as F
 
 
 
+class MixedOp(nn.Module):
 
-class LossFunc(object):
+    def __init__(self):
+        super(MixedOp, self).__init__()
+        self._ops = nn.ModuleList()
+        for primitive in PRIMITIVES:
+            op = OPS[primitive]()
+            self._ops.append(op)
 
-    def __init__(self, operator_size, model, momentum, weight_decay,
-                 arch_learning_rate, arch_weight_decay,
-                 predictor, pred_learning_rate,
-                 architecture_criterion=F.mse_loss,
-                 predictor_criterion=F.mse_loss,
-                 is_gae=False,
-                 reconstruct_criterion=None,
-                 preprocessor=None,
-                 num_nodes=14):
-        self.network_momentum = momentum
-        self.network_weight_decay = weight_decay
+    def forward(self, states, operator_weights, ops_weights):
+        idx = ops_weights.argmax(dim=-1)
+        x1_idx, x2_idx = operator_weights.topk(k=2, dim=-1)[1]
+        return ops_weights[idx] * self._ops[idx](states[x1_idx], states[x2_idx]), self._ops[idx], x1_idx, x2_idx
 
-        # LFS
-        self.operator_size = operator_size
-        self.num_nodes = num_nodes
-        self.alphas_operation = None
-        self.alphas_operator = None
-        self.g_operation = None
-        self.g_operator = None
+        # return sum(w * op(x) for w, op in zip(weights, self._ops))
 
-        # models
-        self.model = model
-        self.predictor = predictor
-        self.is_gae = is_gae
-        self.preprocessor = preprocessor
-        self.reconstruct_criterion = reconstruct_criterion
-        if self.is_gae: assert self.reconstruct_criterion is not None
 
-        # architecture optimization
-        self.architecture_optimizer = torch.optim.Adam(
-            self.model.arch_parameters(), lr=arch_learning_rate, betas=(0.5, 0.999),
-            weight_decay=arch_weight_decay
+class LossFunc(nn.Module):
+
+    def __init__(self, num_operator_choice=8, num_states=11, tau=0.1, gamma=5):
+        super(LossFunc, self).__init__()
+        self.num_initial_state = 3 # 1, p_k, p_j
+        self.states = []
+        self.num_operator_choice = num_operator_choice
+        self.num_states = num_states
+        self._tau = tau
+        self.gamma = gamma
+
+        self._ops = nn.ModuleList()
+        for i in range(num_states):
+            op = MixedOp()
+            self._ops.append(op)
+
+        # operations number
+        num_ops = len(PRIMITIVES)
+
+        # init architecture parameters alpha
+        self.alphas_ops = (1e-3 * torch.randn(num_states, num_ops)).to('cuda').requires_grad_(True)
+        self.alphas_operators = (1e-3 * torch.randn(num_states, num_operator_choice)).to('cuda').requires_grad_(True)
+        # init Gumbel distribution for Gumbel softmax sampler
+        self.g_ops = gumbel_like(self.alphas_ops)
+        self.g_operators = gumbel_like(self.alphas_operators)
+
+    def forward(self, logits, target):
+        target = target.view(-1, 1)
+        logp_k = F.log_softmax(logits, -1)
+        softmax_logits = logp_k.exp()
+        logp_k = logp_k.gather(1, target)
+        logp_k = logp_k.view(-1)
+        p_k = logp_k.exp()  # p_k: probility at target label
+        p_j_mask = torch.lt(softmax_logits,
+                            p_k.reshape(p_k.shape[0], 1)) * 1  # mask all logit larger and equal than p_k
+        p_j = torch.topk(p_j_mask * softmax_logits, 1)[0].squeeze()
+
+
+        ops_weights = gumbel_softmax(self.alphas_ops.data, tau=self._tau, dim=-1, g=self.g_ops)
+        operator_weights = gumbel_softmax(self.alphas_operators.data, tau=self._tau, dim=-1, g=self.g_operators)
+
+        self.states = [torch.ones_like(p_k, requires_grad=True), p_k, p_j]
+        while len(self.states) < self.num_operator_choice:
+            self.states.extend(self.states)
+
+        operator_choices = self.states[-self.num_operator_choice:]
+        op_list = []
+        x1_list = []
+        for i in range(self.num_states):
+            s, op, x1_idx, x2_idx = self._ops[i](operator_choices, operator_weights[i], ops_weights[i])
+            self.states.append(s)
+        loss = -self.states[-1].pow(self.gamma) * logp_k
+        return loss.sum()
+
+    def arch_parameters(self) -> List[torch.tensor]:
+        return [self.alphas_ops, self.alphas_operators]
+
+class Network(nn.Module):
+
+    def __init__(self, C, num_classes, layers, criterion, tau, steps=4, multiplier=4, stem_multiplier=3):
+        """
+        :param C: init channels number
+        :param num_classes: classes numbers
+        :param layers: total number of layers
+        :param criterion: loss function
+        :param steps:
+        :param multiplier:
+        :param stem_multiplier:
+        """
+        super(Network, self).__init__()
+        self._C = C
+        self._num_classes = num_classes
+        self._layers = layers
+        self._criterion = criterion
+        self._steps = steps
+        self._multiplier = multiplier
+        self._tau = tau
+
+        # stem layer
+        C_curr = stem_multiplier * C
+        self.stem = nn.Sequential(
+            nn.Conv2d(3, C_curr, 3, padding=1, bias=False),
+            nn.BatchNorm2d(C_curr)
         )
-        self.architecture_criterion = architecture_criterion
 
-        # predictor optimization
-        self.predictor_optimizer = torch.optim.Adam(
-            self.predictor.predictor.parameters(), lr=pred_learning_rate, betas=(0.5, 0.999)
+        # body layers (normal and reduction)
+        C_prev_prev, C_prev, C_curr = C_curr, C_curr, C
+        self.cells = nn.ModuleList()
+        reduction_prev = False
+        for i in range(layers):
+            if i in [layers // 3, 2 * layers // 3]:
+                C_curr *= 2
+                reduction = True
+            else:
+                reduction = False
+            cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev)
+            reduction_prev = reduction
+            self.cells += [cell]
+            C_prev_prev, C_prev = C_prev, multiplier * C_curr
+
+        self.global_pooling = nn.AdaptiveAvgPool2d(1)
+        self.classifier = nn.Linear(C_prev, num_classes)
+
+        self._initialize_alphas()
+
+    def new(self):
+        model_new = Network(self._C, self._num_classes, self._layers, self._criterion).to('cuda')
+        for x, y in zip(model_new.arch_parameters(), self.arch_parameters()):
+            x.data.copy_(y.data)
+        return model_new
+
+    def forward(self, input):
+        s0 = s1 = self.stem(input)
+        for i, cell in enumerate(self.cells):
+            if cell.reduction:
+                weights = gumbel_softmax(self.alphas_reduce.data, tau=self._tau, dim=-1, g=self.g_reduce)
+            else:
+                weights = gumbel_softmax(self.alphas_normal.data, tau=self._tau, dim=-1, g=self.g_normal)
+            s0, s1 = s1, cell(s0, s1, weights)
+        out = self.global_pooling(s1)
+        logits = self.classifier(out.view(out.size(0), -1))
+        return logits
+
+    def _loss(self, input, target):
+        logits = self(input)
+        return self._criterion(logits, target)
+
+    def _initialize_alphas(self):
+        # calculate edge number k = (((1+1) + (steps+1)) * steps) / 2
+        k = ((self._steps + 3) * self._steps) // 2
+        # operations number
+        num_ops = len(PRIMITIVES)
+
+        # init architecture parameters alpha
+        self.alphas_normal = (1e-3 * torch.randn(k, num_ops)).to('cuda').requires_grad_(True)
+        self.alphas_reduce = (1e-3 * torch.randn(k, num_ops)).to('cuda').requires_grad_(True)
+        # init Gumbel distribution for Gumbel softmax sampler
+        self.g_normal = gumbel_like(self.alphas_normal)
+        self.g_reduce = gumbel_like(self.alphas_reduce)
+
+    def arch_parameters(self) -> List[torch.tensor]:
+        return [self.alphas_normal, self.alphas_reduce]
+
+    def arch_weights(self, cat: bool = True) -> Union[List[torch.tensor], torch.tensor]:
+        weights = [
+            gumbel_softmax(self.alphas_normal, tau=self._tau, dim=-1, g=self.g_normal),
+            gumbel_softmax(self.alphas_reduce, tau=self._tau, dim=-1, g=self.g_reduce)
+        ]
+        if cat:
+            return torch.cat(weights)
+        else:
+            return weights
+
+    def genotype(self) -> Genotype:
+
+        def _parse(weights):
+            gene = []
+            n = 2
+            start = 0
+            for i in range(self._steps):
+                end = start + n
+                W = weights[start:end].copy()
+                edges = sorted(range(i + 2),
+                               key=lambda x: -max(W[x][k] for k in range(len(W[x])) if k != PRIMITIVES.index('none')))[
+                        :2]
+                for j in edges:
+                    k_best = None
+                    for k in range(len(W[j])):
+                        if k != PRIMITIVES.index('none'):
+                            if k_best is None or W[j][k] > W[j][k_best]:
+                                k_best = k
+                    gene.append((PRIMITIVES[k_best], j))
+                start = end
+                n += 1
+            return gene
+
+        gene_normal = _parse(self.alphas_normal.detach().to('cpu').numpy())
+        gene_reduce = _parse(self.alphas_reduce.detach().to('cpu').numpy())
+
+        concat = range(2 + self._steps - self._multiplier, self._steps + 2)
+        genotype = Genotype(
+            normal=gene_normal, normal_concat=concat,
+            reduce=gene_reduce, reduce_concat=concat
         )
-        self.predictor_criterion = predictor_criterion
-
-    def _compute_unrolled_model(self, input, target, eta, network_optimizer):
-        loss = self.model._loss(input, target)
-        theta = _concat(self.model.parameters()).data
-        try:
-            moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.parameters()).mul_(
-                self.network_momentum)
-        except:
-            moment = torch.zeros_like(theta)
-        dtheta = _concat(torch.autograd.grad(loss, self.model.parameters())).data + self.network_weight_decay * theta
-        unrolled_model = self._construct_model_from_theta(theta.sub(eta, moment + dtheta))
-        return unrolled_model
-
-    def predictor_step(self, x, y, unsupervised=False):
-        # clear prev gradient
-        self.predictor_optimizer.zero_grad()
-        if self.is_gae:
-            # convert architecture parameters from matrix to graph
-            adj_normal, opt_normal = arch_matrix_to_graph(x[0])
-            adj_reduce, opt_reduce = arch_matrix_to_graph(x[1])
-            # preprocess graphs
-            if self.preprocessor is not None:
-                processed_adj_normal, processed_opt_normal = self.preprocessor(adj=adj_normal, opt=opt_normal)
-                processed_adj_reduce, processed_opt_reduce = self.preprocessor(adj=adj_reduce, opt=opt_reduce)
-            else:
-                processed_adj_normal, processed_opt_normal = adj_normal, opt_normal
-                processed_adj_reduce, processed_opt_reduce = adj_reduce, opt_reduce
-            # get output
-            (opt_recon_normal, opt_recon_reduce), \
-            (adj_recon_normal, adj_recon_reduce), \
-            z, y_pred = self.predictor(
-                opt=(processed_opt_normal, processed_opt_reduce),
-                adj=(processed_adj_normal, processed_adj_reduce)
-            )
-            y_pred = y_pred.squeeze()
-            # calculate loss
-            loss = self.reconstruct_criterion(
-                [opt_recon_normal, adj_recon_normal], [opt_normal, adj_normal]
-            ) + self.reconstruct_criterion(
-                [opt_recon_reduce, adj_recon_reduce], [opt_reduce, adj_reduce]
-            )
-            if not unsupervised:
-                acc_mse = self.predictor_criterion(y_pred, y)
-                loss *= 0.8
-                loss += acc_mse
-        else:
-            if unsupervised: logging.warning('unsupervised is only available for auto-encoding')
-            # get output
-            y_pred = self.predictor(x)
-            # calculate loss
-            loss = self.predictor_criterion(y_pred, y)
-        # back-prop and optimization step
-        loss.backward()
-        self.predictor_optimizer.step()
-        return y_pred, loss
-
-    def step(self):
-        self.architecture_optimizer.zero_grad()
-        loss = self._backward_step()
-        loss.backward()
-        self.architecture_optimizer.step()
-        return loss
-
-    def _backward_step(self):
-        if self.is_gae:
-            # convert architecture parameters from matrix to graph
-            graphs = self.model.arch_weights(cat=False)
-            adj_normal, opt_normal = arch_matrix_to_graph(graphs[0].unsqueeze(0))
-            adj_reduce, opt_reduce = arch_matrix_to_graph(graphs[1].unsqueeze(0))
-            # preprocess graphs
-            if self.preprocessor is not None:
-                processed_adj_normal, processed_opt_normal = self.preprocessor(adj=adj_normal, opt=opt_normal)
-                processed_adj_reduce, processed_opt_reduce = self.preprocessor(adj=adj_reduce, opt=opt_reduce)
-            else:
-                processed_adj_normal, processed_opt_normal = adj_normal, opt_normal
-                processed_adj_reduce, processed_opt_reduce = adj_reduce, opt_reduce
-            # get output
-            _, _, z, y_pred = self.predictor(
-                opt=(processed_opt_normal, processed_opt_reduce),
-                adj=(processed_adj_normal, processed_adj_reduce)
-            )
-            y_pred = y_pred.squeeze()
-        else:
-            y_pred = self.predictor(self.model.arch_weights().unsqueeze(0))
-        loss = self.architecture_criterion(y_pred, torch.zeros_like(y_pred))
-        return loss
-
-    def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer):
-        unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer)
-        unrolled_loss = unrolled_model._loss(input_valid, target_valid)
-
-        unrolled_loss.backward()
-        dalpha = [v.grad for v in unrolled_model.arch_parameters()]
-        vector = [v.grad.data for v in unrolled_model.parameters()]
-        implicit_grads = self._hessian_vector_product(vector, input_train, target_train)
-
-        for g, ig in zip(dalpha, implicit_grads):
-            g.data.sub_(eta, ig.data)
-
-        for v, g in zip(self.model.arch_parameters(), dalpha):
-            if v.grad is None:
-                v.grad = g.data
-            else:
-                v.grad.data.copy_(g.data)
-
-    def _construct_model_from_theta(self, theta):
-        model_new = self.model.new()
-        model_dict = self.model.state_dict()
-
-        params, offset = {}, 0
-        for k, v in self.model.named_parameters():
-            v_length = np.prod(v.size())
-            params[k] = theta[offset: offset + v_length].view(v.size())
-            offset += v_length
-
-        assert offset == len(theta)
-        model_dict.update(params)
-        model_new.load_state_dict(model_dict)
-        return model_new.to('cuda')
-
-    def _hessian_vector_product(self, vector, input, target, r=1e-2):
-        R = r / _concat(vector).norm()
-        for p, v in zip(self.model.parameters(), vector):
-            p.data.add_(R, v)
-        loss = self.model._loss(input, target)
-        grads_p = torch.autograd.grad(loss, self.model.arch_parameters())
-
-        for p, v in zip(self.model.parameters(), vector):
-            p.data.sub_(2 * R, v)
-        loss = self.model._loss(input, target)
-        grads_n = torch.autograd.grad(loss, self.model.arch_parameters())
-
-        for p, v in zip(self.model.parameters(), vector):
-            p.data.add_(R, v)
-
-        return [(x - y).div_(2 * R) for x, y in zip(grads_p, grads_n)]
+        return genotype

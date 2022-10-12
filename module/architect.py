@@ -12,12 +12,12 @@ def _concat(xs):
     return torch.cat([x.view(-1) for x in xs])
 
 
-class Architect(object):
+class LFS(object):
 
-    def __init__(self, model, momentum, weight_decay,
-                 arch_learning_rate, arch_weight_decay,
+    def __init__(self, lossfunc, model, momentum, weight_decay,
+                 lfs_learning_rate, lfs_weight_decay,
                  predictor, pred_learning_rate,
-                 architecture_criterion=F.mse_loss,
+                 lfs_criterion=F.mse_loss,
                  predictor_criterion=F.mse_loss,
                  is_gae=False,
                  reconstruct_criterion=None,
@@ -26,6 +26,7 @@ class Architect(object):
         self.network_weight_decay = weight_decay
 
         # models
+        self.lossfunc = lossfunc
         self.model = model
         self.predictor = predictor
         self.is_gae = is_gae
@@ -33,12 +34,12 @@ class Architect(object):
         self.reconstruct_criterion = reconstruct_criterion
         if self.is_gae: assert self.reconstruct_criterion is not None
 
-        # architecture optimization
-        self.architecture_optimizer = torch.optim.Adam(
-            self.model.arch_parameters(), lr=arch_learning_rate, betas=(0.5, 0.999),
-            weight_decay=arch_weight_decay
+        # lfs optimization
+        self.lfs_optimizer = torch.optim.Adam(
+            self.lossfunc.arch_parameters(), lr=lfs_learning_rate, betas=(0.5, 0.999),
+            weight_decay=lfs_weight_decay
         )
-        self.architecture_criterion = architecture_criterion
+        self.lfs_criterion = lfs_criterion
 
         # predictor optimization
         self.predictor_optimizer = torch.optim.Adam(
@@ -61,7 +62,7 @@ class Architect(object):
         # clear prev gradient
         self.predictor_optimizer.zero_grad()
         if self.is_gae:
-            # convert architecture parameters from matrix to graph
+            # convert lfs parameters from matrix to graph
             adj_normal, opt_normal = arch_matrix_to_graph(x[0])
             adj_reduce, opt_reduce = arch_matrix_to_graph(x[1])
             # preprocess graphs
@@ -101,15 +102,15 @@ class Architect(object):
         return y_pred, loss
 
     def step(self):
-        self.architecture_optimizer.zero_grad()
+        self.lfs_optimizer.zero_grad()
         loss = self._backward_step()
         loss.backward()
-        self.architecture_optimizer.step()
+        self.lfs_optimizer.step()
         return loss
 
     def _backward_step(self):
         if self.is_gae:
-            # convert architecture parameters from matrix to graph
+            # convert lfs parameters from matrix to graph
             graphs = self.model.arch_weights(cat=False)
             adj_normal, opt_normal = arch_matrix_to_graph(graphs[0].unsqueeze(0))
             adj_reduce, opt_reduce = arch_matrix_to_graph(graphs[1].unsqueeze(0))
@@ -128,7 +129,7 @@ class Architect(object):
             y_pred = y_pred.squeeze()
         else:
             y_pred = self.predictor(self.model.arch_weights().unsqueeze(0))
-        loss = self.architecture_criterion(y_pred, torch.zeros_like(y_pred))
+        loss = self.lfs_criterion(y_pred, torch.zeros_like(y_pred))
         return loss
 
     def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer):
