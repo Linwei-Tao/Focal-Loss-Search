@@ -1,19 +1,6 @@
 import torch
 from torch import nn
 
-from module.estimator.memory import Experience  # latency
-
-
-def weighted_loss(output, target):
-    # squared error
-    loss = (output - target)**2
-    # weighted loss
-    loss = torch.ones_like(target) / target * loss
-    # calculate mean
-    loss = torch.mean(loss)
-    return loss
-
-
 class Predictor(nn.Module):
 
     def __init__(self, input_size, hidden_size):

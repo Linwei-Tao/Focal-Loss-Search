@@ -17,22 +17,26 @@ from torch.utils.data import DataLoader, SubsetRandomSampler
 from torchvision.datasets import CIFAR10
 
 import utils
-from module.architect import LFS
-from module.estimator.estimator import Estimator, PredictorForGraph
-from module.estimator.gnn.decoder import LinearDecoder
-from module.estimator.gnn.encoder import GINEncoder
-from module.estimator.gnn.gae import GAEExtractor
-from module.estimator.gnn.loss import ReconstructedLoss
-from module.estimator.memory import Memory
-from module.estimator.population import Population
-from module.estimator.predictor import Predictor, weighted_loss
-from module.estimator.utils import GraphPreprocessor
-from utils import gumbel_like, gpu_usage
+from module.loss_searcher import LFS
+from module.memory import Memory
+from module.predictor import Predictor
+from utils import gumbel_like
 
-from module.resnet import resnet18, resnet34, resnet50, resnet110
+from module.resnet import resnet50
 from module.loss import LossFunc
+from module.loss_rejector import LossRejector
+
+# Import metrics to compute
+from Metrics.metrics import test_classification_net_logits
+from Metrics.metrics import ECELoss, AdaptiveECELoss, ClasswiseECELoss
+
+# Import temperature scaling and NLL utilities
+from temperature_scaling import ModelWithTemperature
+
+
 
 CIFAR_CLASSES = 10
+
 
 
 def main():
@@ -99,63 +103,31 @@ def main():
     # learning rate scheduler (with cosine annealing)
     scheduler = CosineAnnealingLR(optimizer, int(args.epochs), eta_min=args.learning_rate_min)
 
+    # loss function
     lossfunc = LossFunc()
 
-    # construct architect with architect.Architect
-    if args.predictor_type == 'lstm':
-        is_gae = False
-        # -- preprocessor --
-        preprocessor = None
-        # -- build model --
-        predictor = Predictor(input_size=lossfunc.num_states + lossfunc.num_operator_choice,
-                              hidden_size=args.predictor_hidden_state)
-        predictor = predictor.to('cuda')
-        reconstruct_criterion = None
-    elif args.predictor_type == 'gae':
-        is_gae = True
-        # -- preprocessor --
-        preprocessor = GraphPreprocessor(mode=args.preprocess_mode, lamb=args.preprocess_lamb)
-        # -- build model --
-        predictor = Estimator(
-            extractor=GAEExtractor(
-                encoder=GINEncoder(
-                    input_dim=args.opt_num, hidden_dim=args.hidden_dim, latent_dim=args.latent_dim,
-                    num_layers=args.num_layers, num_mlp_layers=args.num_mlp_layers
-                ),
-                decoder=LinearDecoder(
-                    latent_dim=args.latent_dim, decode_dim=args.opt_num, dropout=args.dropout,
-                    activation_adj=torch.sigmoid, activation_opt=torch.softmax
-                )
-            ),
-            predictor=PredictorForGraph(in_features=args.latent_dim * 2, out_features=1)
-        )
-        predictor = predictor.to('cuda')
-        reconstruct_criterion = ReconstructedLoss(
-            loss_opt=torch.nn.BCELoss(), loss_adj=F.mse_loss, w_opt=1.0, w_adj=1.0
-        )
-    else:
-        raise ValueError('unknown estimator type: %s' % args.predictor_type)
+
+    # -- build model --
+    predictor = Predictor(input_size=lossfunc.num_states + lossfunc.num_operator_choice,
+                          hidden_size=args.predictor_hidden_state)
+    predictor = predictor.to('cuda')
+
     logging.info("predictor param size = %fMB", utils.count_parameters_in_MB(predictor))
 
-    if args.weighted_loss:
-        logging.info('using weighted MSE loss for predictor')
-        predictor_criterion = weighted_loss
-    else:
-        logging.info('using MSE loss for predictor')
-        predictor_criterion = F.mse_loss
+    logging.info('using MSE loss for predictor')
+    predictor_criterion = F.mse_loss
 
+    # loss function searcher
     lfs = LFS(
         lossfunc=lossfunc, model=model, momentum=args.momentum, weight_decay=args.weight_decay,
         lfs_learning_rate=args.lfs_learning_rate, lfs_weight_decay=args.lfs_weight_decay,
         predictor=predictor, pred_learning_rate=args.pred_learning_rate,
-        lfs_criterion=F.mse_loss, predictor_criterion=predictor_criterion,
-        is_gae=is_gae, reconstruct_criterion=reconstruct_criterion, preprocessor=preprocessor
+        lfs_criterion=F.mse_loss, predictor_criterion=predictor_criterion
     )
 
-    if args.evolution:
-        memory = Population(batch_size=args.predictor_batch_size, tau=args.tau, is_gae=is_gae)
-    else:
-        memory = Memory(limit=args.memory_size, batch_size=args.predictor_batch_size, is_gae=is_gae)
+    loss_rejector = LossRejector(lossfunc, train_queue, model, num_rejection_sample=5)
+
+    memory = Memory(limit=args.memory_size, batch_size=args.predictor_batch_size)
 
     # --- Part 1: model warm-up and build memory---
     # 1.1 model warm-up
@@ -168,23 +140,24 @@ def main():
         # 1.1.1 sample cells for warm-up
         warm_up_gumbel = []
         # assert args.warm_up_population >= args.predictor_batch_size
-        for epoch in range(args.warm_up_population):
+        while len(warm_up_gumbel) < args.warm_up_population:
             g_ops = gumbel_like(lossfunc.alphas_ops)
-            g_operator = gumbel_like(lossfunc.alphas_operators)
-            warm_up_gumbel.append((g_ops, g_operator))
+            g_operators = gumbel_like(lossfunc.alphas_operators)
+            flag, g_ops, g_operators = loss_rejector.evaluate_loss(g_ops, g_operators)
+            if flag: warm_up_gumbel.append((g_ops, g_operators))
         utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel-warm-up.pickle'))
         # 1.1.2 warm up
         for epoch, gumbel in enumerate(warm_up_gumbel):
             logging.info('[warm-up model] epoch %d/%d', epoch + 1, args.warm_up_population)
             # warm-up
-            lossfunc.g_operation, lossfunc.g_operator = gumbel
+            lossfunc.g_ops, lossfunc.g_operators = gumbel
+            print("Objection function: ",lossfunc.loss_str())
             objs, top1, top5 = model_train(train_queue, model, lossfunc, optimizer, name='warm-up model')
             logging.info('[warm-up model] epoch %d/%d overall loss=%.4f top1-acc=%.4f top5-acc=%.4f',
                          epoch + 1, args.warm_up_population, objs, top1, top5)
             # save weights
             utils.save(model, os.path.join(args.save, 'model-weights-warm-up.pt'))
-            # gpu info
-            gpu_usage()
+
 
     # 1.2 build memory (i.e. valid model)
     if args.load_memory is not None:
@@ -198,25 +171,20 @@ def main():
     else:
         for epoch, gumbel in enumerate(warm_up_gumbel):
             # re-sample Gumbel distribution
-            lossfunc.g_operation, lossfunc.g_operator = gumbel
+            lossfunc.g_ops, lossfunc.g_operators = gumbel
             # train model for one step
             objs, top1, top5 = model_train(train_queue, model, lossfunc, optimizer, name='build memory')
             logging.info('[build memory] train model-%03d loss=%.4f top1-acc=%.4f',
                          epoch + 1, objs, top1)
             # valid model
-            objs, top1, top5, ece, nll = model_valid(valid_queue, model, lossfunc, name='build memory')
-            logging.info('[build memory] valid model-%03d loss=%.4f top1-acc=%.4f',
-                         epoch + 1, objs, top1)
+            p_accuracy, p_ece, p_adaece, p_cece, p_nll, T_opt, ece, adaece, cece, nll = model_valid(valid_queue, model)
+            logging.info('[build memory] valid model-%03d nll=%.4f top1-acc=%.4f ece=%.4f',
+                         epoch + 1, p_nll, p_accuracy, p_ece)
             # save to memory
-            if args.evolution:
-                memory.append(individual=[(model.alphas_operation.detach().clone(), lossfunc.g_operation.detach().clone()),
-                                          (model.alphas_reduce.detach().clone(), lossfunc.g_operator.detach().clone())],
-                              fitness=torch.tensor(objs, dtype=torch.float32).to('cuda'))
-            else:
-                memory.append(weights=[w.detach() for w in model.arch_weights(cat=False)],
+            memory.append(weights=torch.stack([w.detach() for w in lossfunc.arch_weights()]),
                               nll=torch.tensor(nll, dtype=torch.float32).to('cuda'),
-                              acc=torch.tensor(top1, dtype=torch.float32).to('cuda'),
-                              ece=torch.tensor(ece, dtype=torch.float32).to('cuda'))
+                              acc=torch.tensor(p_accuracy, dtype=torch.float32).to('cuda'),
+                              ece=torch.tensor(p_ece, dtype=torch.float32).to('cuda'))
             # checkpoint: model, memory
             utils.save(model, os.path.join(args.save, 'model-weights-valid.pt'))
             utils.pickle_save(memory.state_dict(),
@@ -241,38 +209,21 @@ def main():
             logging.info('kendall\'s-tau=%.4f' % k_tau)
             # save predictor
             utils.save(lfs.predictor, os.path.join(args.save, 'predictor-warm-up.pt'))
-    # gpu info
-    gpu_usage()
-    # log genotype
-    log_genotype(model)
 
     # --- Part 3 loss function search ---
     for epoch in range(args.epochs):
-        # get current learning rate
-        lr = scheduler.get_lr()[0]
-        logging.info('[loss function search] epoch %d/%d lr %e', epoch + 1, args.epochs, lr)
         # search
         objs, top1, top5, objp = search(train_queue, valid_queue, model, lfs, lossfunc, optimizer, memory)
         # save weights
         utils.save(model, os.path.join(args.save, 'model-weights-search.pt'))
-        # log genotype
-        log_genotype(model)
         # update learning rate
         scheduler.step()
+        # get current learning rate
+        lr = scheduler.get_lr()[0]
+        logging.info('[loss function search] epoch %d/%d lr %e', epoch + 1, args.epochs, lr)
         # log
         logging.info('[loss function search] overall loss=%.4f top1-acc=%.4f top5-acc=%.4f predictor_loss=%.4f',
                      objs, top1, top5, objp)
-        # gpu info
-        gpu_usage()
-
-
-def log_genotype(lossfunc):
-    # log genotype (i.e. alpha)
-    genotype = lossfunc.genotype()
-    logging.info('genotype = %s', genotype)
-    logging.info('alphas_normal: %s\n%s', torch.argmax(lossfunc.alphas_operation, dim=-1), lossfunc.alphas_operation)
-    logging.info('alphas_reduce: %s\n%s', torch.argmax(lossfunc.alphas_operator, dim=-1), lossfunc.alphas_operator)
-
 
 def model_train(train_queue, model, lossfunc, optimizer, name):
     # set model to training model
@@ -309,51 +260,64 @@ def model_train(train_queue, model, lossfunc, optimizer, name):
     return objs.avg, top1.avg, top5.avg
 
 
-def model_valid(valid_queue, model, lossfunc, name):
-    # set model to evaluation model
-    model.eval()
-    # create metrics
-    objs = utils.AverageMeter()
-    top1 = utils.AverageMeter()
-    top5 = utils.AverageMeter()
-    # validation loop
-    total_steps = len(valid_queue)
-    for step, (x, target) in enumerate(valid_queue):
-        n = x.size(0)
-        # data to CUDA
-        x = x.to('cuda').requires_grad_(False)
-        target = target.to('cuda', non_blocking=True).requires_grad_(False)
-        # valid model
-        logits = model(x)
-        loss = lossfunc(logits, target)
-        prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
-        # update metrics
-        objs.update(loss.data.item(), n)
-        top1.update(prec1.data.item(), n)
-        top5.update(prec5.data.item(), n)
-        # log
-        if step % args.report_freq == 0:
-            logging.info('[%s] valid model %03d/%03d loss=%.4f top1-acc=%.4f top5-acc=%.4f',
-                         name, step, total_steps, objs.avg, top1.avg, top5.avg)
-    return objs.avg, top1.avg, top5.avg
+def model_valid(valid_queue, model):
+    nll_criterion = nn.CrossEntropyLoss().cuda()
+    ece_criterion = ECELoss().cuda()
+    adaece_criterion = AdaptiveECELoss().cuda()
+    cece_criterion = ClasswiseECELoss().cuda()
+
+    logits, labels = get_logits_labels(valid_queue, model)
+    conf_matrix, p_accuracy, _, _, _ = test_classification_net_logits(logits, labels)
+
+    p_ece = ece_criterion(logits, labels).item()
+    p_adaece = adaece_criterion(logits, labels).item()
+    p_cece = cece_criterion(logits, labels).item()
+    p_nll = nll_criterion(logits, labels).item()
+
+    scaled_model = ModelWithTemperature(model)
+    scaled_model.set_temperature(valid_queue, cross_validate="ece")
+    T_opt = scaled_model.get_temperature()
+    logits, labels = get_logits_labels(valid_queue, scaled_model)
+    conf_matrix, accuracy, _, _, _ = test_classification_net_logits(logits, labels)
+
+    ece = ece_criterion(logits, labels).item()
+    adaece = adaece_criterion(logits, labels).item()
+    cece = cece_criterion(logits, labels).item()
+    nll = nll_criterion(logits, labels).item()
 
 
-def predictor_train(architect, memory, unsupervised=False):
-    # TODO: add support for gae predictor training
+
+    return p_accuracy, p_ece, p_adaece, p_cece, p_nll, T_opt, ece, adaece, cece, nll
+
+def get_logits_labels(data_loader, net):
+    logits_list = []
+    labels_list = []
+    net.eval()
+    with torch.no_grad():
+        for data, label in data_loader:
+            data = data.cuda()
+            logits = net(data)
+            logits_list.append(logits)
+            labels_list.append(label)
+        logits = torch.cat(logits_list).cuda()
+        labels = torch.cat(labels_list).cuda()
+    return logits, labels
+
+def predictor_train(lfs, memory, unsupervised=False):
     objs = utils.AverageMeter()
     batch = memory.get_batch()
-    all_y = []
+    all_nll = []
     all_p = []
-    for x, y in batch:
-        n = y.size(0)
-        pred, loss = architect.predictor_step(x, y, unsupervised=unsupervised)
+    for weights, nll, acc, ece in batch:
+        n = nll.size(0)
+        pred, loss = lfs.predictor_step(weights, nll)
         objs.update(loss.data.item(), n)
-        all_y.append(y)
+        all_nll.append(nll)
         all_p.append(pred)
-    return objs.avg, torch.cat(all_y), torch.cat(all_p)
+    return objs.avg, torch.cat(all_nll), torch.cat(all_p)
 
 
-def search(train_queue, valid_queue, model, architect, lossfunc, optimizer, memory):
+def search(train_queue, valid_queue, model, lfs, lossfunc, optimizer, memory):
     # -- train model --
     gsw_normal, gsw_reduce = 1., 1.  # gumbel sampling weight
     lossfunc.g_operation = gumbel_like(model.alphas_operation) * gsw_normal
@@ -361,39 +325,35 @@ def search(train_queue, valid_queue, model, architect, lossfunc, optimizer, memo
     # train model for one step
     model_train(train_queue, model, lossfunc, optimizer, name='build memory')
     # -- valid model --
-    objs, top1, top5 = model_valid(valid_queue, model, lossfunc, name='build memory')
+    p_accuracy, p_ece, p_adaece, p_cece, p_nll, T_opt, ece, adaece, cece, nll = model_valid(valid_queue, model)
     # save validation to memory
-    logging.info('[loss function search] append memory objs=%.4f top1-acc=%.4f top5-acc=%.4f', objs, top1, top5)
-    if args.evolution:
-        memory.append(individual=[(model.alphas_operation.detach().clone(), lossfunc.g_operation.detach().clone()),
-                                  (model.alphas_reduce.detach().clone(), lossfunc.g_operator.detach().clone())],
-                      fitness=torch.tensor(objs, dtype=torch.float32).to('cuda'))
-        index = memory.remove('highest')
-        logging.info('[evolution] %d is removed (population size: %d).' % (index, len(memory)))
-    else:
-        memory.append(weights=[w.detach() for w in model.arch_weights(cat=False)],
-                      loss=torch.tensor(objs, dtype=torch.float32).to('cuda'))
+    logging.info('[loss function search] append memory nll=%.4f top1-acc=%.4f ece=%.4f', p_nll, p_accuracy, p_ece)
+    # save to memory
+    memory.append(weights=torch.stack([w.detach() for w in lossfunc.arch_weights()]),
+                  nll=torch.tensor(nll, dtype=torch.float32).to('cuda'),
+                  acc=torch.tensor(p_accuracy, dtype=torch.float32).to('cuda'),
+                  ece=torch.tensor(p_ece, dtype=torch.float32).to('cuda'))
     utils.pickle_save(memory.state_dict(),
                       os.path.join(args.save, 'memory-search.pickle'))
 
     # -- predictor train --
-    architect.predictor.train()
+    lfs.predictor.train()
     # use memory to train predictor
     p_loss, p_true, p_pred = None, None, None
     k_tau = -float('inf')
     for _ in range(args.predictor_warm_up):
-        p_loss, p_true, p_pred = predictor_train(architect, memory)
+        p_loss, p_true, p_pred = predictor_train(lfs, memory)
         k_tau = kendalltau(p_true.detach().to('cpu'), p_pred.detach().to('cpu'))[0]
         if k_tau > 0.95: break
     logging.info('[loss function search] train predictor p_loss=%.4f\np-true: %s\np-pred: %s',
                  p_loss, p_true.data, p_pred.data)
     logging.info('kendall\'s-tau=%.4f' % k_tau)
 
-    architect.step()
+    lfs.step()
     # log
     logging.info('[loss function search] update architecture')
 
-    return objs, top1, top5, p_loss
+    return nll, p_accuracy, p_ece, p_loss
 
 
 if __name__ == '__main__':
@@ -425,15 +385,12 @@ if __name__ == '__main__':
     parser.add_argument('--load_model', type=str, default=None, help='load model weights from file')
     parser.add_argument('--load_memory', type=str, default=None, help='load memory from file')
     parser.add_argument('--tau', type=float, default=0.1, help='tau')
-    parser.add_argument('--evolution', action='store_true', default=False, help='use weighted loss')
-    parser.add_argument('--diw', action='store_true', default=False, help='dimension importance aware')
     # predictor setting
     parser.add_argument('--predictor_type', type=str, default='lstm')
     parser.add_argument('--predictor_warm_up', type=int, default=500, help='predictor warm-up steps')
     parser.add_argument('--predictor_hidden_state', type=int, default=16, help='predictor hidden state')
     parser.add_argument('--predictor_batch_size', type=int, default=64, help='predictor batch size')
     parser.add_argument('--pred_learning_rate', type=float, default=1e-3, help='predictor learning rate')
-    parser.add_argument('--weighted_loss', action='store_true', default=False, help='use weighted loss')
     parser.add_argument('--load_extractor', type=str, default=None, help='load memory from file')
     # model setting
     parser.add_argument('--init_channels', type=int, default=16, help='num of init channels')
@@ -442,26 +399,13 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
     parser.add_argument('--seed', type=int, default=1, help='random seed')
     parser.add_argument('--debug', action='store_true', default=False, help='set logging level to debug')
-    # GAE related
-    parser.add_argument('--opt_num', type=int, default=11)
-    parser.add_argument('--hidden_dim', type=int, default=128)
-    parser.add_argument('--latent_dim', type=int, default=16)
-    parser.add_argument('--num_layers', type=int, default=5)
-    parser.add_argument('--num_mlp_layers', type=int, default=2)
-    parser.add_argument('--dropout', type=float, default=0.3)
-
-    # data
-    parser.add_argument('--preprocess_mode', type=int, default=4)
-    parser.add_argument('--preprocess_lamb', type=float, default=0.)
 
     # loss function search
     parser.add_argument('--operator_size', type=int, default=8)
 
     args, unknown_args = parser.parse_known_args()
 
-    args.save = 'checkpoints/search{}-{}-{}'.format(
-        '-ea' if args.evolution else '', args.save, time.strftime("%Y%m%d-%H%M%S")
-    )
+    args.save = 'checkpoints/search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
     utils.create_exp_dir(
         path=args.save,
         scripts_to_save=glob.glob('*.py') + glob.glob('module/**/*.py', recursive=True)

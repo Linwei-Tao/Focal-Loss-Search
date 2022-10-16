@@ -286,12 +286,6 @@ class LRScheduler(object):
         return [param_group['lr'] for param_group in self.optimizer.param_groups]
 
 
-def gpu_usage():
-    print('Device name: %s' % torch.cuda.get_device_name(0))
-    print('Memory usage:')
-    print('  Allocated: %.4f GB' % (torch.cuda.memory_allocated(0) / 1024 ** 3))
-    print('  Cached:    %.4f GB' % (torch.cuda.memory_cached(0) / 1024 ** 3))
-
 
 def get_search_arguments():
     parser = argparse.ArgumentParser("cifar")
