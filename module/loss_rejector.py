@@ -5,7 +5,7 @@ from torch.nn import functional as F
 
 class LossRejector(nn.Module):
 
-    def __init__(self, lossfunc, train_queue, model, num_rejection_sample=5, threshold=0.6, Gradient_Equivalence_Check=True):
+    def __init__(self, lossfunc, train_queue, model, num_rejection_sample=5, threshold=0.9, Gradient_Equivalence_Check=True):
         super(LossRejector, self).__init__()
         self.lossfunc = lossfunc
         self.train_queue = train_queue
@@ -33,18 +33,23 @@ class LossRejector(nn.Module):
         learnable_logits = nn.Parameter(random_logits.data)
         self.optimizer.param_groups[0]['params'] = learnable_logits
         self.optimizer = torch.optim.SGD([learnable_logits], lr=self.lr, momentum=self.momentum)
+
+        # assign gumbels to lossfunc
+        self.lossfunc.g_ops, self.lossfunc.g_operators = g_ops, g_operators
+
         # forward
         for step in range(self.steps):
             self.optimizer.zero_grad()
-            self.lossfunc.g_ops, self.lossfunc.g_operators = g_ops, g_operators
-            loss = self.lossfunc(learnable_logits, target)
+            loss, nll = self.lossfunc(learnable_logits, target)
             # loss = F.cross_entropy(learnable_logits, target)
             # backward
             loss.backward()
+            if loss <= 0:
+                return False, g_ops, g_operators
             self.optimizer.step()
         learnd_prec1, learnd_prec5 = utils.accuracy(learnable_logits, target, topk=(1, 5))
-        if learnd_prec1/100 - random_prec1/100 > self.threshold:
-            print("Got One with acc {:2f}%!!!  {}".format(learnd_prec1, self.lossfunc.loss_str()))
+        if learnd_prec1/100 > self.threshold:
+            print("Got One Loss with acc {:2f}%!!!  {}".format(learnd_prec1, self.lossfunc.loss_str()))
             return 1, g_ops, g_operators
         else:
             return 0, None, None

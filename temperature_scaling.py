@@ -2,8 +2,7 @@
 Code to perform temperature scaling. Adapted from https://github.com/gpleiss/temperature_scaling
 '''
 import torch
-import numpy as np
-from torch import nn, optim
+from torch import nn
 from torch.nn import functional as F
 
 

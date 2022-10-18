@@ -1,6 +1,7 @@
 import argparse
 import glob
 import logging
+# import wandb
 import os
 import sys
 import time
@@ -33,13 +34,12 @@ from Metrics.metrics import ECELoss, AdaptiveECELoss, ClasswiseECELoss
 # Import temperature scaling and NLL utilities
 from temperature_scaling import ModelWithTemperature
 
-
-
 CIFAR_CLASSES = 10
 
 
-
 def main():
+    # wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args)
+
     if not torch.cuda.is_available():
         logging.info('no gpu device available')
         sys.exit(1)
@@ -55,21 +55,14 @@ def main():
     torch.manual_seed(args.seed)  # set random seed: torch
     cudnn.enabled = True
     torch.cuda.manual_seed(args.seed)  # set random seed: torch.cuda
-    logging.info('gpu device = %d' % args.gpu)
     logging.info("args = %s", args)
-    if len(unknown_args) > 0:
-        logging.warning('unknown_args: %s' % unknown_args)
-    else:
-        logging.info('unknown_args: %s' % unknown_args)
-    # Loss Function Search
 
-    # build the model with model_search.Network
-    logging.info("init arch param")
+    # build model
     model = resnet50(num_classes=CIFAR_CLASSES)
     model = model.to('cuda')
-    logging.info("model param size = %fMB", utils.count_parameters_in_MB(model))
+    # wandb.config.model_size = utils.count_parameters_in_MB(model)
 
-    # use SGD to optimize the model (optimize model.parameters())
+    # use SGD to optimize the model
     optimizer = torch.optim.SGD(
         model.parameters(),
         args.learning_rate,
@@ -106,15 +99,10 @@ def main():
     # loss function
     lossfunc = LossFunc()
 
-
     # -- build model --
-    predictor = Predictor(input_size=lossfunc.num_states + lossfunc.num_operator_choice,
+    predictor = Predictor(input_size=lossfunc.num_states + lossfunc.num_operator_choice - 1,
                           hidden_size=args.predictor_hidden_state)
     predictor = predictor.to('cuda')
-
-    logging.info("predictor param size = %fMB", utils.count_parameters_in_MB(predictor))
-
-    logging.info('using MSE loss for predictor')
     predictor_criterion = F.mse_loss
 
     # loss function searcher
@@ -125,7 +113,8 @@ def main():
         lfs_criterion=F.mse_loss, predictor_criterion=predictor_criterion
     )
 
-    loss_rejector = LossRejector(lossfunc, train_queue, model, num_rejection_sample=5)
+    loss_rejector = LossRejector(lossfunc, train_queue, model, num_rejection_sample=5,
+                                 threshold=args.loss_rejector_threshold)
 
     memory = Memory(limit=args.memory_size, batch_size=args.predictor_batch_size)
 
@@ -151,13 +140,12 @@ def main():
             logging.info('[warm-up model] epoch %d/%d', epoch + 1, args.warm_up_population)
             # warm-up
             lossfunc.g_ops, lossfunc.g_operators = gumbel
-            print("Objection function: ",lossfunc.loss_str())
-            objs, top1, top5 = model_train(train_queue, model, lossfunc, optimizer, name='warm-up model')
-            logging.info('[warm-up model] epoch %d/%d overall loss=%.4f top1-acc=%.4f top5-acc=%.4f',
-                         epoch + 1, args.warm_up_population, objs, top1, top5)
+            logging.info("Objection function: %s", lossfunc.loss_str())
+            objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer, name='warm-up model')
+            logging.info('[warm-up model] epoch %d/%d overall loss=%.4f top1-acc=%.4f nll=%.4f',
+                         epoch + 1, args.warm_up_population, objs, top1, nll)
             # save weights
             utils.save(model, os.path.join(args.save, 'model-weights-warm-up.pt'))
-
 
     # 1.2 build memory (i.e. valid model)
     if args.load_memory is not None:
@@ -172,25 +160,25 @@ def main():
         for epoch, gumbel in enumerate(warm_up_gumbel):
             # re-sample Gumbel distribution
             lossfunc.g_ops, lossfunc.g_operators = gumbel
+            # log function
+            logging.info("Objection function: %s", lossfunc.loss_str())
             # train model for one step
-            objs, top1, top5 = model_train(train_queue, model, lossfunc, optimizer, name='build memory')
-            logging.info('[build memory] train model-%03d loss=%.4f top1-acc=%.4f',
-                         epoch + 1, objs, top1)
+            objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer, name='build memory')
+            logging.info('[build memory] train model-%03d train_loss=%.4f train_top1-acc=%.4f nll=%.4f',
+                         epoch + 1, objs, top1, nll)
             # valid model
             p_accuracy, p_ece, p_adaece, p_cece, p_nll, T_opt, ece, adaece, cece, nll = model_valid(valid_queue, model)
-            logging.info('[build memory] valid model-%03d nll=%.4f top1-acc=%.4f ece=%.4f',
+            logging.info('[build memory] valid model-%03d valid_nll=%.4f valid_top1-acc=%.4f valid_ece=%.4f',
                          epoch + 1, p_nll, p_accuracy, p_ece)
             # save to memory
             memory.append(weights=torch.stack([w.detach() for w in lossfunc.arch_weights()]),
-                              nll=torch.tensor(nll, dtype=torch.float32).to('cuda'),
-                              acc=torch.tensor(p_accuracy, dtype=torch.float32).to('cuda'),
-                              ece=torch.tensor(p_ece, dtype=torch.float32).to('cuda'))
+                          nll=torch.tensor(nll, dtype=torch.float32).to('cuda'),
+                          acc=torch.tensor(p_accuracy, dtype=torch.float32).to('cuda'),
+                          ece=torch.tensor(p_ece, dtype=torch.float32).to('cuda'))
             # checkpoint: model, memory
             utils.save(model, os.path.join(args.save, 'model-weights-valid.pt'))
             utils.pickle_save(memory.state_dict(),
                               os.path.join(args.save, 'memory-warm-up.pickle'))
-
-    logging.info('memory size=%d', len(memory))
 
     # --- Part 2 predictor warm-up ---
     if args.load_extractor is not None:
@@ -201,10 +189,9 @@ def main():
     for epoch in range(args.predictor_warm_up):
         epoch += 1
         # warm-up
-        p_loss, p_true, p_pred = predictor_train(lossfunc, memory)
+        p_loss, p_true, p_pred = predictor_train(lfs, memory)
         if epoch % args.report_freq == 0 or epoch == args.predictor_warm_up:
             logging.info('[warm-up predictor] epoch %d/%d loss=%.4f', epoch, args.predictor_warm_up, p_loss)
-            logging.info('\np-true: %s\np-pred: %s', p_true.data, p_pred.data)
             k_tau = kendalltau(p_true.detach().to('cpu'), p_pred.detach().to('cpu'))[0]
             logging.info('kendall\'s-tau=%.4f' % k_tau)
             # save predictor
@@ -213,23 +200,26 @@ def main():
     # --- Part 3 loss function search ---
     for epoch in range(args.epochs):
         # search
-        objs, top1, top5, objp = search(train_queue, valid_queue, model, lfs, lossfunc, optimizer, memory)
+        objs, top1, top5, objp = search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer,
+                                        memory, args.gumbel_scale)
         # save weights
         utils.save(model, os.path.join(args.save, 'model-weights-search.pt'))
         # update learning rate
         scheduler.step()
         # get current learning rate
-        lr = scheduler.get_lr()[0]
+        lr = scheduler.get_last_lr()[0]
         logging.info('[loss function search] epoch %d/%d lr %e', epoch + 1, args.epochs, lr)
         # log
-        logging.info('[loss function search] overall loss=%.4f top1-acc=%.4f top5-acc=%.4f predictor_loss=%.4f',
-                     objs, top1, top5, objp)
+        logging.info('[loss function search] overall loss=%.4f top1-acc=%.4f predictor_loss=%.4f',
+                     objs, top1, objp)
+
 
 def model_train(train_queue, model, lossfunc, optimizer, name):
     # set model to training model
     model.train()
     # create metrics
     objs = utils.AverageMeter()
+    nlls = utils.AverageMeter()
     top1 = utils.AverageMeter()
     top5 = utils.AverageMeter()
     # training loop
@@ -243,7 +233,7 @@ def model_train(train_queue, model, lossfunc, optimizer, name):
         # forward
         optimizer.zero_grad()
         logits = model(x)
-        loss = lossfunc(logits, target)
+        nll, loss = lossfunc(logits, target)
         # backward
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -251,13 +241,14 @@ def model_train(train_queue, model, lossfunc, optimizer, name):
         prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
         # update metrics
         objs.update(loss.data.item(), n)
+        nlls.update(nll.data.item(), n)
         top1.update(prec1.data.item(), n)
         top5.update(prec5.data.item(), n)
         if step % args.report_freq == 0:
-            logging.info('[%s] train model %03d/%03d loss=%.4f top1-acc=%.4f top5-acc=%.4f',
-                         name, step, total_steps, objs.avg, top1.avg, top5.avg)
+            logging.info('[%s] train model %03d/%03d loss=%.4f top1-acc=%.4f nll=%.4f',
+                         name, step, total_steps, objs.avg, top1.avg, nlls.avg)
     # return average metrics
-    return objs.avg, top1.avg, top5.avg
+    return objs.avg, top1.avg, top5.avg, nlls.avg
 
 
 def model_valid(valid_queue, model):
@@ -285,9 +276,8 @@ def model_valid(valid_queue, model):
     cece = cece_criterion(logits, labels).item()
     nll = nll_criterion(logits, labels).item()
 
-
-
     return p_accuracy, p_ece, p_adaece, p_cece, p_nll, T_opt, ece, adaece, cece, nll
+
 
 def get_logits_labels(data_loader, net):
     logits_list = []
@@ -303,7 +293,8 @@ def get_logits_labels(data_loader, net):
         labels = torch.cat(labels_list).cuda()
     return logits, labels
 
-def predictor_train(lfs, memory, unsupervised=False):
+
+def predictor_train(lfs, memory):
     objs = utils.AverageMeter()
     batch = memory.get_batch()
     all_nll = []
@@ -317,11 +308,29 @@ def predictor_train(lfs, memory, unsupervised=False):
     return objs.avg, torch.cat(all_nll), torch.cat(all_p)
 
 
-def search(train_queue, valid_queue, model, lfs, lossfunc, optimizer, memory):
+def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer, memory, gumbel_scale=0.1):
     # -- train model --
-    gsw_normal, gsw_reduce = 1., 1.  # gumbel sampling weight
-    lossfunc.g_operation = gumbel_like(model.alphas_operation) * gsw_normal
-    lossfunc.g_operator = gumbel_like(model.alphas_reduce) * gsw_reduce
+    # gumbel sampling and rejection process
+    GOOD_LOSS = False
+    while not GOOD_LOSS:
+        lossfunc.g_ops = gumbel_like(lossfunc.alphas_ops) * gumbel_scale
+        lossfunc.g_operators = gumbel_like(lossfunc.alphas_operators) * gumbel_scale
+        GOOD_LOSS, g_ops, g_operators = loss_rejector.evaluate_loss(lossfunc.g_ops, lossfunc.g_operators)
+
+    # watch updates
+    print(lossfunc.loss_str())
+
+    torch.set_printoptions(precision=2)
+
+    print("arch_weights_ops: ", lossfunc.arch_weights_ops())
+    print("gumbel_ops: ", lossfunc.g_ops)
+    print("alpha_ops: ", lossfunc.alphas_ops)
+
+    print("arch_weights_operators: ", lossfunc.arch_weights_operators())
+    print("gumbel_operators: ", lossfunc.g_operators)
+    print("alpha_operators: ", lossfunc.alphas_operators)
+
+
     # train model for one step
     model_train(train_queue, model, lossfunc, optimizer, name='build memory')
     # -- valid model --
@@ -345,8 +354,6 @@ def search(train_queue, valid_queue, model, lfs, lossfunc, optimizer, memory):
         p_loss, p_true, p_pred = predictor_train(lfs, memory)
         k_tau = kendalltau(p_true.detach().to('cpu'), p_pred.detach().to('cpu'))[0]
         if k_tau > 0.95: break
-    logging.info('[loss function search] train predictor p_loss=%.4f\np-true: %s\np-pred: %s',
-                 p_loss, p_true.data, p_pred.data)
     logging.info('kendall\'s-tau=%.4f' % k_tau)
 
     lfs.step()
@@ -402,6 +409,8 @@ if __name__ == '__main__':
 
     # loss function search
     parser.add_argument('--operator_size', type=int, default=8)
+    parser.add_argument('--loss_rejector_threshold', type=float, default=0.6, help='loss rejcetion threshold')
+    parser.add_argument('--gumbel_scale', type=float, default=0.5, help='gumbel_scale')
 
     args, unknown_args = parser.parse_known_args()
 
