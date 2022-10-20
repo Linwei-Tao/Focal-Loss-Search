@@ -52,8 +52,8 @@ class LossRejector(nn.Module):
         ).cuda()
 
 
-
-        test_target = torch.zeros(5, dtype=torch.int64).cuda()
+        # using first dimensional as p_k
+        test_target = torch.zeros(test_logit.shape[0], dtype=torch.int64).cuda()
         _, logits_rank = F.softmax(test_logit, -1)[:, 0].sort(descending=True)
         loss_array, nll_array = self.lossfunc(test_logit, test_target, output_loss_array=True)
         if not (loss_array.sort()[1] == logits_rank).sum() == logits_rank.shape[0]:
