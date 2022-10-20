@@ -12,7 +12,6 @@ PRIMITIVES = [
     'square',
     'sqrt',
     'iden1',
-    'iden2',
     'one_plus',
     'one_minus',
 ]

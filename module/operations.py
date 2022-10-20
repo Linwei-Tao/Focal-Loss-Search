@@ -19,7 +19,6 @@ OPS = {
     'square': lambda: Square(),
     'sqrt': lambda: Sqrt(),
     'iden1': lambda: Iden1(),
-    'iden2': lambda: Iden2(),
     'one_plus': lambda: One_plus(),
     'one_minus': lambda: One_minus(),
 }
@@ -136,14 +135,6 @@ class Iden1(nn.Module):
     def forward(self, x1, x2):
         return x1
 
-class Iden2(nn.Module):
-
-    def __init__(self):
-        super(Iden2, self).__init__()
-        self.arity = 1
-
-    def forward(self, x1, x2):
-        return x2
 
 
 class One_plus(nn.Module):

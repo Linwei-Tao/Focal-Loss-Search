@@ -100,7 +100,7 @@ def main():
     lossfunc = LossFunc()
 
     # -- build model --
-    predictor = Predictor(input_size=14,
+    predictor = Predictor(input_size=13,
                           hidden_size=args.predictor_hidden_state)
     predictor = predictor.to('cuda')
     predictor_criterion = F.mse_loss
