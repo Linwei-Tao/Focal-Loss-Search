@@ -3,9 +3,11 @@ from torch import nn
 import utils
 from torch.nn import functional as F
 
+
 class LossRejector(nn.Module):
 
-    def __init__(self, lossfunc, train_queue, model, num_rejection_sample=5, threshold=0.9, Gradient_Equivalence_Check=True):
+    def __init__(self, lossfunc, train_queue, model, num_rejection_sample=5, threshold=0.9,
+                 Gradient_Equivalence_Check=True):
         super(LossRejector, self).__init__()
         self.lossfunc = lossfunc
         self.train_queue = train_queue
@@ -40,10 +42,19 @@ class LossRejector(nn.Module):
         # check1: loss at pk=0 equals to 0 ===========> with log(p_k), the loss function is innative 0
 
         # check2: Monotonically decreasing between 0～1
-        # test 30 logits, need the rank align with input rank
-        test_logit = torch.rand(30, 10).cuda() * 20
-        test_target = torch.zeros(30, dtype=torch.int64).cuda()
-        _, logits_rank = F.softmax(test_logit, -1)[:,0].sort(descending=True)
+        # test 5 logits, need the rank align with input rank. Softmax logits 0.9 0.7 0.5 0.3 0.1 monotonically decreasing
+        test_logit = torch.FloatTensor(
+            [[5.5, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+             [4.1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+             [3.2, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+             [2.3, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+             [1.1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]
+        ).cuda()
+
+
+
+        test_target = torch.zeros(5, dtype=torch.int64).cuda()
+        _, logits_rank = F.softmax(test_logit, -1)[:, 0].sort(descending=True)
         loss_array, nll_array = self.lossfunc(test_logit, test_target, output_loss_array=True)
         if not (loss_array.sort()[1] == logits_rank).sum() == logits_rank.shape[0]:
             return 0, None
@@ -56,7 +67,7 @@ class LossRejector(nn.Module):
             loss.backward()
             self.optimizer.step()
         learnd_prec1, learnd_prec5 = utils.accuracy(learnable_logits, target, topk=(1, 5))
-        if learnd_prec1/100 > self.threshold:
+        if learnd_prec1 / 100 > self.threshold:
             print("Got One Loss with acc {:2f}%!!!  {}".format(learnd_prec1, self.lossfunc.loss_str()))
             return 1, g_ops
         else:
