@@ -18,21 +18,19 @@ class MixedOp(nn.Module):
             op = OPS[primitive]()
             self._ops.append(op)
 
-    def forward(self, states, operator_weights, ops_weights):
+    def forward(self, x1, x2, ops_weights):
         idx = ops_weights.argmax(dim=-1)
-        x1_idx, x2_idx = operator_weights.topk(k=2, dim=-1)[1]
-        return ops_weights[idx] * self._ops[idx](states[x1_idx], states[x2_idx]), self._ops[idx], x1_idx, x2_idx
+        return ops_weights[idx] * self._ops[idx](x1, x2)
 
         # return sum(w * op(x) for w, op in zip(weights, self._ops))
 
 
 class LossFunc(nn.Module):
 
-    def __init__(self, num_operator_choice=8, num_states=11, tau=0.1, gamma=5):
+    def __init__(self, num_states=11, tau=0.1, gamma=5):
         super(LossFunc, self).__init__()
         self.num_initial_state = 3  # 1, p_k, p_j
         self.states = []
-        self.num_operator_choice = num_operator_choice
         self.num_states = num_states
         self._tau = tau
         self.gamma = gamma  # fix gamma
@@ -47,12 +45,10 @@ class LossFunc(nn.Module):
 
         # init architecture parameters alpha
         self.alphas_ops = (1e-3 * torch.randn(num_states, num_ops)).to('cuda').requires_grad_(True)
-        self.alphas_operators = (1e-3 * torch.randn(num_states, num_operator_choice)).to('cuda').requires_grad_(True)
         # init Gumbel distribution for Gumbel softmax sampler
         self.g_ops = gumbel_like(self.alphas_ops)
-        self.g_operators = gumbel_like(self.alphas_operators)
 
-    def forward(self, logits, target):
+    def forward(self, logits, target, output_loss_array=False):
         target = target.view(-1, 1)
         logp_k = F.log_softmax(logits, -1)
         softmax_logits = logp_k.exp()
@@ -64,29 +60,24 @@ class LossFunc(nn.Module):
         p_j = torch.topk(p_j_mask * softmax_logits, 1)[0].squeeze()
 
         ops_weights = gumbel_softmax(self.alphas_ops.data, tau=self._tau, dim=-1, g=self.g_ops)
-        operator_weights = gumbel_softmax(self.alphas_operators.data, tau=self._tau, dim=-1, g=self.g_operators)
-        self.states = [torch.ones_like(p_k, requires_grad=True), p_k, p_j, torch.ones_like(p_k, requires_grad=True), p_k, p_j, p_k, p_j]
+        self.states = [p_k, p_j]
 
-        # while len(self.states) < self.num_operator_choice:
-        #     self.states.extend(self.states)
-
-        operator_choices = self.states[-self.num_operator_choice:]
+        s0, s1 = p_k, p_j
         for i in range(self.num_states):
-            s, op, x1_idx, x2_idx = self._ops[i](operator_choices, operator_weights[i], ops_weights[i])
-            self.states.append(s)
+            s0, s1 = s1, self._ops[i](s0, s1, ops_weights[i])
+            self.states.append(s1)
         # loss = -self.states[-1].pow(self.gamma) * logp_k
         nll = -logp_k
         loss = self.states[-1] * nll
+        if output_loss_array:
+            return loss, nll
         return loss.sum(), nll.sum()
 
     def arch_parameters(self) -> List[torch.tensor]:
-        return [self.alphas_ops, self.alphas_operators]
+        return [self.alphas_ops]
 
-    def arch_weights(self, cat: bool = True) -> Union[List[torch.tensor], torch.tensor]:
-        weights = [
-            gumbel_softmax(self.alphas_ops, tau=self._tau, dim=-1, g=self.g_ops),
-            gumbel_softmax(self.alphas_operators, tau=self._tau, dim=-1, g=self.g_operators)
-        ]
+    def arch_weights(self, cat: bool = False) -> Union[List[torch.tensor], torch.tensor]:
+        weights = gumbel_softmax(self.alphas_ops, tau=self._tau, dim=-1, g=self.g_ops)
         if cat:
             return torch.cat(weights, dim=-1)
         else:
@@ -102,22 +93,30 @@ class LossFunc(nn.Module):
 
     def loss_str(self):
         ops_weights = gumbel_softmax(self.alphas_ops.data, tau=self._tau, dim=-1, g=self.g_ops)
-        operator_weights = gumbel_softmax(self.alphas_operators.data, tau=self._tau, dim=-1, g=self.g_operators)
-        states = ["1", "p_k", "p_j", "1", "p_k", "p_j", "p_k", "p_j"]
+        states = ["p_k", "p_j"]
 
         op_list = []
-        operator_list = []
         for i in range(self.num_states):
             idx = ops_weights[i].argmax(dim=-1)
             op_list.append(PRIMITIVES[idx])
-            x1_idx, x2_idx = operator_weights[i].topk(k=2, dim=-1)[1]
-            operator_list.append((x1_idx, x2_idx))
 
+
+        s0, s1 = "p_k", "p_j"
         for index, op in enumerate(op_list):
-            x1_idx, x2_idx = operator_list[index]
-            if op == 'add' or op == 'mul':
-                s = "{}({}, {})".format(op, states[-8:][x1_idx], states[-8:][x2_idx])
+            if op == 'add':
+                s0, s1 = s1, "{} + {}".format(s0, s1)
+            elif op == 'mul':
+                s0, s1 = s1, "{} * {}".format(s0, s1)
+            elif op == 'iden2':
+                s0, s1 = s1, s1
+            elif op == 'iden1':
+                s0, s1 = s1, s0
+            elif op == 'one_plus':
+                s0, s1 = s1, "1 + {}".format(s0)
+            elif op == 'one_minus':
+                s0, s1 = s1, "1 - {}".format(s0)
             else:
-                s = "{}({})".format(op, states[-8:][x1_idx])
-            states.append(s)
+                s0, s1 = s1, "{}({})".format(op, s0)
+
+            states.append(s1)
         return "-{}*log(p_k)".format(states[-1])

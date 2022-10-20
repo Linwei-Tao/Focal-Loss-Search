@@ -17,7 +17,11 @@ OPS = {
     'exp': lambda: Exp(),
     'tanh': lambda: Tanh(),
     'square': lambda: Square(),
-    'sqrt': lambda: Sqrt()
+    'sqrt': lambda: Sqrt(),
+    'iden1': lambda: Iden1(),
+    'iden2': lambda: Iden2(),
+    'one_plus': lambda: One_plus(),
+    'one_minus': lambda: One_minus(),
 }
 
 
@@ -109,9 +113,9 @@ class Square(nn.Module):
         super(Square, self).__init__()
         self.arity = 1
 
-
     def forward(self, x1, x2):
-        return x1**2
+        return x1 ** 2
+
 
 class Sqrt(nn.Module):
 
@@ -119,6 +123,43 @@ class Sqrt(nn.Module):
         super(Sqrt, self).__init__()
         self.arity = 1
 
-
     def forward(self, x1, x2):
         return torch.sign(x1) * torch.sqrt(torch.abs(x1) + EPS)
+
+
+class Iden1(nn.Module):
+
+    def __init__(self):
+        super(Iden1, self).__init__()
+        self.arity = 1
+
+    def forward(self, x1, x2):
+        return x1
+
+class Iden2(nn.Module):
+
+    def __init__(self):
+        super(Iden2, self).__init__()
+        self.arity = 1
+
+    def forward(self, x1, x2):
+        return x2
+
+
+class One_plus(nn.Module):
+
+    def __init__(self):
+        super(One_plus, self).__init__()
+        self.arity = 1
+
+    def forward(self, x1, x2):
+        return 1 + x1
+
+class One_minus(nn.Module):
+
+    def __init__(self):
+        super(One_minus, self).__init__()
+        self.arity = 1
+
+    def forward(self, x1, x2):
+        return 1 - x1

@@ -100,7 +100,7 @@ def main():
     lossfunc = LossFunc()
 
     # -- build model --
-    predictor = Predictor(input_size=lossfunc.num_states + lossfunc.num_operator_choice - 1,
+    predictor = Predictor(input_size=14,
                           hidden_size=args.predictor_hidden_state)
     predictor = predictor.to('cuda')
     predictor_criterion = F.mse_loss
@@ -131,16 +131,15 @@ def main():
         # assert args.warm_up_population >= args.predictor_batch_size
         while len(warm_up_gumbel) < args.warm_up_population:
             g_ops = gumbel_like(lossfunc.alphas_ops)
-            g_operators = gumbel_like(lossfunc.alphas_operators)
-            flag, g_ops, g_operators = loss_rejector.evaluate_loss(g_ops, g_operators)
-            if flag: warm_up_gumbel.append((g_ops, g_operators))
+            flag, g_ops = loss_rejector.evaluate_loss(g_ops)
+            if flag: warm_up_gumbel.append((g_ops))
         utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel-warm-up.pickle'))
         # 1.1.2 warm up
         for epoch, gumbel in enumerate(warm_up_gumbel):
             logging.info('[warm-up model] epoch %d/%d', epoch + 1, args.warm_up_population)
             # warm-up
-            lossfunc.g_ops, lossfunc.g_operators = gumbel
-            logging.info("Objection function: %s", lossfunc.loss_str())
+            lossfunc.g_ops = gumbel
+            logging.info("Objective function: %s", lossfunc.loss_str())
             objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer, name='warm-up model')
             logging.info('[warm-up model] epoch %d/%d overall loss=%.4f top1-acc=%.4f nll=%.4f',
                          epoch + 1, args.warm_up_population, objs, top1, nll)
@@ -159,9 +158,9 @@ def main():
     else:
         for epoch, gumbel in enumerate(warm_up_gumbel):
             # re-sample Gumbel distribution
-            lossfunc.g_ops, lossfunc.g_operators = gumbel
+            lossfunc.g_ops = gumbel
             # log function
-            logging.info("Objection function: %s", lossfunc.loss_str())
+            logging.info("Objective function: %s", lossfunc.loss_str())
             # train model for one step
             objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer, name='build memory')
             logging.info('[build memory] train model-%03d train_loss=%.4f train_top1-acc=%.4f nll=%.4f',
@@ -171,7 +170,7 @@ def main():
             logging.info('[build memory] valid model-%03d valid_nll=%.4f valid_top1-acc=%.4f valid_ece=%.4f',
                          epoch + 1, p_nll, p_accuracy, p_ece)
             # save to memory
-            memory.append(weights=torch.stack([w.detach() for w in lossfunc.arch_weights()]),
+            memory.append(weights=lossfunc.arch_weights(),
                           nll=torch.tensor(nll, dtype=torch.float32).to('cuda'),
                           acc=torch.tensor(p_accuracy, dtype=torch.float32).to('cuda'),
                           ece=torch.tensor(p_ece, dtype=torch.float32).to('cuda'))
@@ -308,14 +307,13 @@ def predictor_train(lfs, memory):
     return objs.avg, torch.cat(all_nll), torch.cat(all_p)
 
 
-def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer, memory, gumbel_scale=0.1):
+def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer, memory, gumbel_scale):
     # -- train model --
     # gumbel sampling and rejection process
     GOOD_LOSS = False
     while not GOOD_LOSS:
         lossfunc.g_ops = gumbel_like(lossfunc.alphas_ops) * gumbel_scale
-        lossfunc.g_operators = gumbel_like(lossfunc.alphas_operators) * gumbel_scale
-        GOOD_LOSS, g_ops, g_operators = loss_rejector.evaluate_loss(lossfunc.g_ops, lossfunc.g_operators)
+        GOOD_LOSS, g_ops = loss_rejector.evaluate_loss(lossfunc.g_ops)
 
     # watch updates
     print(lossfunc.loss_str())
@@ -325,11 +323,6 @@ def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimi
     print("arch_weights_ops: ", lossfunc.arch_weights_ops())
     print("gumbel_ops: ", lossfunc.g_ops)
     print("alpha_ops: ", lossfunc.alphas_ops)
-
-    print("arch_weights_operators: ", lossfunc.arch_weights_operators())
-    print("gumbel_operators: ", lossfunc.g_operators)
-    print("alpha_operators: ", lossfunc.alphas_operators)
-
 
     # train model for one step
     model_train(train_queue, model, lossfunc, optimizer, name='build memory')
@@ -410,7 +403,7 @@ if __name__ == '__main__':
     # loss function search
     parser.add_argument('--operator_size', type=int, default=8)
     parser.add_argument('--loss_rejector_threshold', type=float, default=0.6, help='loss rejcetion threshold')
-    parser.add_argument('--gumbel_scale', type=float, default=0.5, help='gumbel_scale')
+    parser.add_argument('--gumbel_scale', type=float, default=1, help='gumbel_scale')
 
     args, unknown_args = parser.parse_known_args()
 

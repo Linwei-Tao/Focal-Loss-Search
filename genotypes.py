@@ -10,7 +10,11 @@ PRIMITIVES = [
     'exp',
     'tanh',
     'square',
-    'sqrt'
+    'sqrt',
+    'iden1',
+    'iden2',
+    'one_plus',
+    'one_minus',
 ]
 
-# -add(tanh(abs(1)), tanh(mul(inv(p_k), abs(1))))*log(p_k)
+# - xxxxxxx  * log(p_k)

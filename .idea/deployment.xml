@@ -1,12 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="linwei@lab2.taolinwei.com:22 agent (2)" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="linwei@lab1.taolinwei.com:22 agent" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
       <paths name="Lab1">
         <serverdata>
           <mappings>
             <mapping deploy="/tmp/Focal-Loss-Search" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="linwei@lab1.taolinwei.com:22 agent">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/mnt/Focal-Loss-Search" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

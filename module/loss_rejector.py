@@ -20,7 +20,7 @@ class LossRejector(nn.Module):
         self.Gradient_Equivalence_Check = Gradient_Equivalence_Check
         self.Gradient_Equivalence = []
 
-    def evaluate_loss(self, g_ops, g_operators):
+    def evaluate_loss(self, g_ops):
         x, target = next(iter(self.train_queue))
         n = x.size(0)
         # data to CUDA
@@ -35,21 +35,29 @@ class LossRejector(nn.Module):
         self.optimizer = torch.optim.SGD([learnable_logits], lr=self.lr, momentum=self.momentum)
 
         # assign gumbels to lossfunc
-        self.lossfunc.g_ops, self.lossfunc.g_operators = g_ops, g_operators
+        self.lossfunc.g_ops = g_ops
 
-        # forward
+        # check1: loss at pk=0 equals to 0 ===========> with log(p_k), the loss function is innative 0
+
+        # check2: Monotonically decreasing between 0～1
+        # test 30 logits, need the rank align with input rank
+        test_logit = torch.rand(30, 10).cuda() * 20
+        test_target = torch.zeros(30, dtype=torch.int64).cuda()
+        _, logits_rank = F.softmax(test_logit, -1)[:,0].sort(descending=True)
+        loss_array, nll_array = self.lossfunc(test_logit, test_target, output_loss_array=True)
+        if not (loss_array.sort()[1] == logits_rank).sum() == logits_rank.shape[0]:
+            return 0, None
+
+        # check3: optimization performance higher than a threhold
         for step in range(self.steps):
             self.optimizer.zero_grad()
             loss, nll = self.lossfunc(learnable_logits, target)
-            # loss = F.cross_entropy(learnable_logits, target)
             # backward
             loss.backward()
-            if loss <= 0:
-                return False, g_ops, g_operators
             self.optimizer.step()
         learnd_prec1, learnd_prec5 = utils.accuracy(learnable_logits, target, topk=(1, 5))
         if learnd_prec1/100 > self.threshold:
             print("Got One Loss with acc {:2f}%!!!  {}".format(learnd_prec1, self.lossfunc.loss_str()))
-            return 1, g_ops, g_operators
+            return 1, g_ops
         else:
-            return 0, None, None
+            return 0, None
