@@ -24,10 +24,9 @@ class LossRejector(nn.Module):
 
     def evaluate_loss(self, g_ops):
         x, target = next(iter(self.train_queue))
-        n = x.size(0)
         # data to CUDA
-        x = x.to('cuda').requires_grad_(False)
-        target = target.to('cuda', non_blocking=True).requires_grad_(False)
+        x = x.cuda().requires_grad_(False)
+        target = target.cuda(non_blocking=True).requires_grad_(False)
         random_logits = self.model(x)
         random_prec1, random_prec5 = utils.accuracy(random_logits, target, topk=(1, 5))
 

@@ -1,16 +1,12 @@
-import argparse
-import glob
 import os
-import logging
-import sys
-import time
+import torch.nn as nn
 
 import numpy as np
 import pickle
 import torch
 import shutil
 import torchvision.transforms as transforms
-
+import torch.nn.functional as F
 from torch.nn.functional import softmax
 
 
@@ -150,3 +146,13 @@ def gumbel_softmax(x, tau=0.1, dim=-1, g=None):
     if g is None:
         g = gumbel_like(x)
     return softmax((x + g) / tau, dim=dim)
+
+
+
+class MO_MSE(nn.Module):
+    def __init__(self, lamda):
+        self.lamda = lamda
+    def forward(self, out, target):
+        acc_loss = F.mse_loss(out[:, 0], target[:, 0])
+        ece_loss = F.mse_loss(out[:, 1], target[:, 1])
+        return acc_loss + self.lamda * ece_loss

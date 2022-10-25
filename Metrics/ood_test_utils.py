@@ -29,11 +29,11 @@ def get_roc_auc(net, test_loader, ood_test_loader, device):
     with torch.no_grad():
         # Getting entropies for in-distribution data
         for i, (data, label) in enumerate(test_loader):
-            data = data.to(device)
-            label = label.to(device)
+            data = data.cuda()
+            label = label.cuda()
 
-            bin_label_entropy = torch.zeros(label.shape).to(device)
-            bin_label_confidence = torch.ones(label.shape).to(device)
+            bin_label_entropy = torch.zeros(label.shape).cuda()
+            bin_label_confidence = torch.ones(label.shape).cuda()
 
             net_output = net(data)
 
@@ -53,11 +53,11 @@ def get_roc_auc(net, test_loader, ood_test_loader, device):
 
         # Getting entropies for OOD data
         for i, (data, label) in enumerate(ood_test_loader):
-            data = data.to(device)
-            label = label.to(device)
+            data = data.cuda()
+            label = label.cuda()
 
-            bin_label_entropy = torch.ones(label.shape).to(device)
-            bin_label_confidence = torch.zeros(label.shape).to(device)
+            bin_label_entropy = torch.ones(label.shape).cuda()
+            bin_label_confidence = torch.zeros(label.shape).cuda()
 
             net_output = net(data)
             entrop = entropy(net_output)

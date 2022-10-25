@@ -52,5 +52,10 @@ class LFS(object):
 
     def _backward_step(self):
         y_pred = self.predictor(self.lossfunc.arch_weights().unsqueeze(0))
-        loss = self.lfs_criterion(y_pred, torch.zeros_like(y_pred))
-        return loss
+        if self.predictor.num_obj > 1:
+            target = torch.ones_like(y_pred)
+            target[:,1] = 0
+        else:
+            target = torch.zeros_like(y_pred)
+        loss = self.lfs_criterion(y_pred, target)
+        return loss, y_pred

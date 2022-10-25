@@ -27,13 +27,12 @@ class MixedOp(nn.Module):
 
 class LossFunc(nn.Module):
 
-    def __init__(self, num_states=11, tau=0.1, gamma=5):
+    def __init__(self, num_states=11, tau=0.1):
         super(LossFunc, self).__init__()
         self.num_initial_state = 3  # 1, p_k, p_j
         self.states = []
         self.num_states = num_states
         self._tau = tau
-        self.gamma = gamma  # fix gamma
 
         self._ops = nn.ModuleList()
         for i in range(num_states):
@@ -67,7 +66,6 @@ class LossFunc(nn.Module):
         for i in range(self.num_states):
             s0, s1 = s1, self._ops[i](s0, s1, ops_weights[i])
             self.states.append(s1)
-        # loss = -self.states[-1].pow(self.gamma) * logp_k
         nll = -logp_k
         loss = self.states[-1] * nll
         if output_loss_array:
@@ -84,16 +82,20 @@ class LossFunc(nn.Module):
         else:
             return weights
 
-    def arch_weights_ops(self, cat: bool = True) -> Union[List[torch.tensor], torch.tensor]:
+    def arch_weights_ops(self) -> Union[List[torch.tensor], torch.tensor]:
         return gumbel_softmax(self.alphas_ops, tau=self._tau, dim=-1, g=self.g_ops)
 
-    def arch_weights_operators(self, cat: bool = True) -> Union[List[torch.tensor], torch.tensor]:
+    def arch_weights_operators(self) -> Union[List[torch.tensor], torch.tensor]:
         return gumbel_softmax(self.alphas_operators, tau=self._tau, dim=-1, g=self.g_operators)
 
 
 
-    def loss_str(self, return_records=False):
-        ops_weights = gumbel_softmax(self.alphas_ops.data, tau=self._tau, dim=-1, g=self.g_ops)
+    def loss_str(self, return_records=False, no_gumbel=False):
+        if no_gumbel:
+            ops_weights = self.alphas_ops.data
+        else:
+            ops_weights = gumbel_softmax(self.alphas_ops.data, tau=self._tau, dim=-1, g=self.g_ops)
+
         states = ["p_k", "p_j"]
         op_list = []
         for i in range(self.num_states):

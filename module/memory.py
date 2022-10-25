@@ -1,4 +1,3 @@
-import logging
 import random
 from collections import namedtuple, deque
 
@@ -25,7 +24,7 @@ class Memory(object):
             'require batch_size (%d) exceeds memory limit, should be less than %d' % (batch_size, self.limit)
         length = len(self)
         if batch_size > length:
-            logging.warning('required batch_size (%d) is larger than memory size (%d)', batch_size, length)
+            print('required batch_size (%d) is larger than memory size (%d)', batch_size, length)
 
         indices = [i for i in range(length)]
         random.shuffle(indices)
