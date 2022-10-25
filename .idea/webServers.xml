@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="5abad47a-48f9-428a-81d4-5a2d8a3dad3a" name="linwei@lab1.taolinwei.com:22 agent">
+        <fileTransfer accessType="SFTP" host="lab1.taolinwei.com" port="22" sshConfigId="eb0bb33f-98a1-4f50-925d-ec7dcc52d43d" sshConfig="linwei@lab1.taolinwei.com:22 agent" authAgent="true" />
+      </webServer>
+    </option>
+  </component>
+</project>
