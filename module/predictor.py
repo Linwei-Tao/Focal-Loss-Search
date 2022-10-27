@@ -8,7 +8,7 @@ class Predictor(nn.Module):
         super(Predictor, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.num_objective = num_obj
+        self.num_obj = num_obj
 
 
         self.embedding = nn.Linear(in_features=self.input_size,
@@ -29,6 +29,10 @@ class Predictor(nn.Module):
         out, (hidden, cell) = self.rnn_cell(x, hidden)
         out = self.logits_cell(hidden)
         out = torch.sigmoid(out) * 2
-        return out.reshape(-1, self.num_objective)
+        if self.num_obj > 1:
+            return out.reshape(-1, self.num_obj)
+        else:
+            return out.squeeze()
+
 
 

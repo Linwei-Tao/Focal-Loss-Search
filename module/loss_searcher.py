@@ -45,10 +45,10 @@ class LFS(object):
 
     def step(self):
         self.lfs_optimizer.zero_grad()
-        loss = self._backward_step()
+        loss, y_pred = self._backward_step()
         loss.backward()
         self.lfs_optimizer.step()
-        return loss
+        return loss, y_pred
 
     def _backward_step(self):
         y_pred = self.predictor(self.lossfunc.arch_weights().unsqueeze(0))

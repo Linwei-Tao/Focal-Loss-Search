@@ -4,8 +4,7 @@ import torch
 from torch import nn
 from module.operations import OPS
 from genotypes import PRIMITIVES
-from utils import gumbel_like
-from utils import gumbel_softmax
+from utils import gumbel_like, gumbel_softmax
 import torch.nn.functional as F
 
 
@@ -18,9 +17,12 @@ class MixedOp(nn.Module):
             op = OPS[primitive]()
             self._ops.append(op)
 
-    def forward(self, x1, x2, ops_weights):
+    def forward(self, x1, x2, ops_weights, gumbel_training=True):
         idx = ops_weights.argmax(dim=-1)
-        return ops_weights[idx] * self._ops[idx](x1, x2)
+        if gumbel_training:
+            return ops_weights[idx] * self._ops[idx](x1, x2)
+        else:
+            return self._ops[idx](x1, x2)
 
         # return sum(w * op(x) for w, op in zip(weights, self._ops))
 
@@ -47,7 +49,7 @@ class LossFunc(nn.Module):
         # init Gumbel distribution for Gumbel softmax sampler
         self.g_ops = gumbel_like(self.alphas_ops)
 
-    def forward(self, logits, target, output_loss_array=False):
+    def forward(self, logits, target, output_loss_array=False, gumbel_training=True):
         target = target.view(-1, 1)
         logp_k = F.log_softmax(logits, -1)
         softmax_logits = logp_k.exp()
@@ -57,14 +59,16 @@ class LossFunc(nn.Module):
         p_j_mask = torch.lt(softmax_logits,
                             p_k.reshape(p_k.shape[0], 1)) * 1  # mask all logit larger and equal than p_k
         p_j = torch.topk(p_j_mask * softmax_logits, 1)[0].squeeze()
-
-        ops_weights = gumbel_softmax(self.alphas_ops.data, tau=self._tau, dim=-1, g=self.g_ops)
+        if gumbel_training:
+            ops_weights = gumbel_softmax(self.alphas_ops.data, tau=self._tau, dim=-1, g=self.g_ops)
+        else:
+            ops_weights = F.softmax(self.alphas_ops, -1)
         self.states = [p_k, p_j]
         self.states_op_record = [p_k, p_j]
 
         s0, s1 = p_k, p_j
         for i in range(self.num_states):
-            s0, s1 = s1, self._ops[i](s0, s1, ops_weights[i])
+            s0, s1 = s1, self._ops[i](s0, s1, ops_weights[i], gumbel_training=gumbel_training)
             self.states.append(s1)
         nll = -logp_k
         loss = self.states[-1] * nll

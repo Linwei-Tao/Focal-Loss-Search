@@ -151,6 +151,8 @@ def gumbel_softmax(x, tau=0.1, dim=-1, g=None):
 
 class MO_MSE(nn.Module):
     def __init__(self, lamda):
+        super(MO_MSE, self).__init__()
+
         self.lamda = lamda
     def forward(self, out, target):
         acc_loss = F.mse_loss(out[:, 0], target[:, 0])

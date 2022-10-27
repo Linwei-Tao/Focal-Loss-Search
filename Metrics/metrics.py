@@ -15,7 +15,7 @@ from torch.nn import functional as F
 from sklearn.metrics import accuracy_score
 
 from sklearn.metrics import confusion_matrix
-from temperature_scaling import ModelWithTemperature
+from utils.temperature_scaling import ModelWithTemperature
 
 # Some keys used for the following dictionaries
 COUNT = 'count'
