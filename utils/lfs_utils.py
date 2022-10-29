@@ -13,7 +13,7 @@ from utils import gumbel_like, pickle_save
 import utils
 
 
-def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer, memory, gumbel_scale, args):
+def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer, memory, gumbel_scale, args, epoch):
     # -- train model --
     # gumbel sampling and rejection process
     GOOD_LOSS = False
@@ -26,12 +26,12 @@ def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimi
     print("alpha_ops: ", F.softmax(lossfunc.alphas_ops, -1))
 
     # train model for one step
-    model_train(train_queue, model, lossfunc, optimizer, name='Searching', args=args)
+    model_train(train_queue, model, lossfunc, optimizer, name='Searching {}/{}'.format(epoch+1, args.search_epochs), args=args)
     # -- valid model --
     pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, post_cece, post_nll = model_valid(
         valid_queue, valid_queue, model)
     # save validation to memory
-    print('[loss function search] append memory nll=%.4f top1-acc=%.4f ece=%.4f' % (pre_nll, pre_accuracy, pre_ece))
+    print('[Loss Function Search] append memory NLL=%.4f ACC=%.4f ECE=%.4f' % (pre_nll, pre_accuracy, pre_ece))
     # save to memory
     memory.append(weights=torch.stack([w.detach() for w in lossfunc.arch_weights()]),
                   nll=torch.tensor(pre_nll, dtype=torch.float32).to('cuda'),

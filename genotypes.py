@@ -1,5 +1,3 @@
-from collections import namedtuple
-
 PRIMITIVES = [
     'add',
     'mul',

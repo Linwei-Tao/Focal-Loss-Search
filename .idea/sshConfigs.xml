@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="PASSWORD" connectionConfig="{&quot;serverAliveInterval&quot;:300}" host="hpc.sydney.edu.au" id="202af23b-256e-41c3-9ce2-83fd3ac5b929" port="22" customName="Artemis" nameFormat="CUSTOM" username="ltao0358" useOpenSSHConfig="true">
+        <option name="customName" value="Artemis" />
+      </sshConfig>
+      <sshConfig authType="PASSWORD" host="gadi.nci.org.au" id="c1807f73-cc76-43a7-9ba1-aa936034bcdd" port="22" nameFormat="DESCRIPTIVE" username="lt2442" useOpenSSHConfig="true" />
+      <sshConfig authType="PASSWORD" host="gadi.nci.org.au" id="ede14ba0-c7aa-41af-8440-6f7eecc2a5d7" port="22" customName="Gadi" nameFormat="CUSTOM" username="lt2442" useOpenSSHConfig="true">
+        <option name="customName" value="Gadi" />
+      </sshConfig>
+    </configs>
+  </component>
+</project>

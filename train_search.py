@@ -4,7 +4,6 @@ import wandb
 import os
 import time
 
-
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -24,10 +23,8 @@ from module.resnet import resnet50
 from module.loss import LossFunc
 from module.loss_rejector import LossRejector
 
-
 # Import utilities
 from utils import gumbel_like, MO_MSE
-
 
 from utils.predictor_utils import predictor_train
 from utils.train_utils import model_train
@@ -65,7 +62,7 @@ def main():
 
     # construct data transformer (including normalization, augmentation)
     train_transform, valid_transform = utils.data_transforms_cifar10(args)
-    # load cifar10 data training set (train=True)
+    # load CIFAR10 data training set (train=True)
     train_data = CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
 
     # generate data indices
@@ -90,27 +87,9 @@ def main():
     scheduler = CosineAnnealingLR(optimizer, int(args.search_epochs), eta_min=args.learning_rate_min)
 
     # loss function
-    lossfunc = LossFunc(num_states=args.num_states, tau=args.tau)
+    lossfunc = LossFunc(num_states=args.num_states, tau=args.tau, noCEFormat=args.noCEFormat)
 
-    # -- build predictor --
-    feature_num = args.num_states + 2  # state number + p_k and p_j
-    predictor = Predictor(input_size=feature_num,
-                          hidden_size=args.predictor_hidden_state,
-                          num_obj=args.num_obj,
-                          predictor_lambda=args.predictor_lambda).cuda()
-
-    predictor_criterion = MO_MSE(args.lfs_lambda) if args.num_obj > 1 else F.mse_loss
-    lfs_criterion = MO_MSE(args.lfs_lambda) if args.num_obj > 1 else F.mse_loss
-
-    # loss function searcher
-    lfs = LFS(
-        lossfunc=lossfunc, model=model, momentum=args.momentum, weight_decay=args.weight_decay,
-        lfs_learning_rate=args.lfs_learning_rate, lfs_weight_decay=args.lfs_weight_decay,
-        predictor=predictor, pred_learning_rate=args.pred_learning_rate,
-        lfs_criterion=lfs_criterion, predictor_criterion=predictor_criterion
-    )
-
-    # a loss evaluator that filter unpromissing loss function
+    # a loss evaluator that filter unpromising loss function
     loss_rejector = LossRejector(lossfunc, train_queue, model, num_rejection_sample=5,
                                  threshold=args.loss_rejector_threshold)
 
@@ -130,23 +109,24 @@ def main():
         while len(warm_up_gumbel) < args.warm_up_population:
             g_ops = gumbel_like(lossfunc.alphas_ops)
             flag, g_ops = loss_rejector.evaluate_loss(g_ops)
-            if flag: warm_up_gumbel.append((g_ops))
+            if flag: warm_up_gumbel.append(g_ops)
         utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel-warm-up.pickle'))
         # 1.1.2 warm up
         for epoch, gumbel in enumerate(warm_up_gumbel):
-            print('[warm-up model] epoch %d/%d' % (epoch + 1, args.warm_up_population))
             # warm-up
             lossfunc.g_ops = gumbel
             print("Objective function: %s" % (lossfunc.loss_str()))
-            objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer, name='warm-up model', args=args)
-            print('[warm-up model] epoch %d/%d searched loss=%.4f top1-acc=%.4f nll=%.4f' % (
+            objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer,
+                                                name='Warm Up Epoch {}/{}'.format(epoch + 1, args.warm_up_population),
+                                                args=args)
+            print('[Warm Up Epoch {}/{}] searched loss={} top1-acc={} nll={}'.format(
                 epoch + 1, args.warm_up_population, objs, top1, nll))
             # save weights
             utils.save(model, os.path.join(args.save, 'model-weights-warm-up.pt'))
 
     # 1.2 build memory (i.e. valid model)
     if args.load_memory is not None:
-        print('Load valid model from %s' % (args.load_model))
+        print('Load valid model from {}'.format(args.load_model))
         model.load_state_dict(torch.load(os.path.join(args.load_memory, 'model-weights-valid.pt')))
         memory.load_state_dict(
             utils.pickle_load(
@@ -160,12 +140,17 @@ def main():
             # log function
             print("Objective function: %s" % (lossfunc.loss_str()))
             # train model for one step
-            model_train(train_queue, model, lossfunc, optimizer, name='build memory {}/{}'.format(epoch+1, args.warm_up_population))
+            model_train(train_queue, model, lossfunc, optimizer,
+                        name='Build Memory Epoch {}/{}'.format(epoch + 1, args.warm_up_population), args=args)
             # valid model
             pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, post_cece, post_nll = model_valid(
-                valid_queue,valid_queue, model)
-            print('[build memory] valid model-%03d valid_nll=%.4f valid_acc=%.4f valid_ece=%.4f' % (
-                epoch + 1, pre_nll, pre_accuracy, pre_ece))
+                valid_queue, valid_queue, model)
+            print('[Build Memory Epoch {}/{}] valid model-{} valid_nll={} valid_acc={} valid_ece={}'.format(epoch + 1,
+                                                                                                            args.warm_up_population,
+                                                                                                            epoch + 1,
+                                                                                                            pre_nll,
+                                                                                                            pre_accuracy,
+                                                                                                            pre_ece))
             # save to memory
             memory.append(weights=lossfunc.arch_weights(),
                           nll=torch.tensor(pre_nll, dtype=torch.float32).to('cuda'),
@@ -177,42 +162,63 @@ def main():
                               os.path.join(args.save, 'memory-warm-up.pickle'))
 
     # --- Part 2 predictor warm-up ---
+    # -- build predictor --
+    _, feature_num = torch.cat(lossfunc.arch_parameters()).shape
+
+    predictor = Predictor(input_size=feature_num,
+                          hidden_size=args.predictor_hidden_state,
+                          num_obj=args.num_obj,
+                          predictor_lambda=args.predictor_lambda).cuda()
+
+
+    # -- build loss function searcher --
+    lfs_criterion = MO_MSE(args.lfs_lambda) if args.num_obj > 1 else F.mse_loss
+    predictor_criterion = MO_MSE(args.lfs_lambda) if args.num_obj > 1 else F.mse_loss
+    lfs = LFS(
+        lossfunc=lossfunc, model=model, momentum=args.momentum, weight_decay=args.weight_decay,
+        lfs_learning_rate=args.lfs_learning_rate, lfs_weight_decay=args.lfs_weight_decay,
+        predictor=predictor, pred_learning_rate=args.pred_learning_rate,
+        lfs_criterion=lfs_criterion, predictor_criterion=predictor_criterion
+    )
+
+    # -- train predictor--
     predictor.train()
     for epoch in range(args.predictor_warm_up):
         # warm-up
         if args.num_obj > 1:
             pred_train_loss, (true_acc, true_ece), (pred_acc, pred_ece) = predictor_train(lfs, memory, args)
             if epoch % args.report_freq == 0 or epoch == args.predictor_warm_up:
-                print('[warm-up predictor] epoch %d/%d loss=%.4f' % (epoch, args.predictor_warm_up,
-                                                                     pred_train_loss))
+                print('[Warm up Predictor Epoch {}/{}]  loss={}'.format(epoch, args.predictor_warm_up,
+                                                                      pred_train_loss))
                 acc_tau = kendalltau(true_acc.detach().to('cpu'), pred_acc.detach().to('cpu'))[0]
                 ece_tau = kendalltau(true_ece.detach().to('cpu'), pred_ece.detach().to('cpu'))[0]
-                print('acc kendall\'s-tau=%.4f   ece kendall\'s-tau=%.4f' % (acc_tau, ece_tau))
+                print('acc kendall\'s-tau={} ece kendall\'s-tau={}'.format(acc_tau, ece_tau))
         else:
             pred_train_loss, true_nll, pred_nll = predictor_train(lfs, memory, args)
             if epoch % args.report_freq == 0 or epoch == args.predictor_warm_up:
-                print('[warm-up predictor] epoch %d/%d loss=%.4f' % (epoch, args.predictor_warm_up, pred_train_loss))
+                print('[Warm up Predictor Epoch {}/{}] loss={}'.format(epoch, args.predictor_warm_up, pred_train_loss))
                 k_tau = kendalltau(true_nll.detach().to('cpu'), pred_nll.detach().to('cpu'))[0]
-                print('kendall\'s-tau=%.4f' % k_tau)
+                print('kendall\'s-tau={}'.format(k_tau))
         # save predictor
         utils.save(lfs.predictor, os.path.join(args.save, 'predictor-warm-up.pt'))
 
+
+
     # --- Part 3 loss function search ---
     for epoch in range(args.search_epochs):
-        print("--"*50)
-        print("Search Epoch: {}/{}".format(epoch+1, args.search_epochs))
         # search
         pre_valid_accuracy, pre_valid_ece, pre_valid_adaece, pre_valid_cece, pre_valid_nll, T_opt, post_valid_ece, \
         post_valid_adaece, post_valid_cece, post_valid_nll, gumbel_loss_str, searched_loss_str = \
             search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer,
-                   memory, args.gumbel_scale, args)
+                   memory, args.gumbel_scale, args, epoch)
         wandb.config.update({"searched_loss_str": searched_loss_str}, allow_val_change=True)
         wandb.log({
-                   "search_pre_valid_accuracy": pre_valid_accuracy, "search_pre_valid_ece": pre_valid_ece,
-                   "search_pre_valid_adaece": pre_valid_adaece, "search_pre_valid_cece": pre_valid_cece,
-                   "search_pre_valid_nll": pre_valid_nll, "search_T_opt": T_opt, "search_post_valid_ece": post_valid_ece, "search_post_valid_adaece": post_valid_adaece,
-                   "search_post_valid_cece": post_valid_cece, "search_post_valid_nll": post_valid_nll,
-                   }, step=epoch)
+            "search_pre_valid_accuracy": pre_valid_accuracy*100, "search_pre_valid_ece": pre_valid_ece*100,
+            "search_pre_valid_adaece": pre_valid_adaece*100, "search_pre_valid_cece": pre_valid_cece*100,
+            "search_pre_valid_nll": pre_valid_nll*100, "search_T_opt": T_opt, "search_post_valid_ece": post_valid_ece*100,
+            "search_post_valid_adaece": post_valid_adaece*100,
+            "search_post_valid_cece": post_valid_cece*100, "search_post_valid_nll": post_valid_nll*100,
+        }, step=epoch)
         # save weights
         utils.save(model, os.path.join(args.save, 'model-weights-search.pt'))
         # update learning rate
@@ -223,23 +229,8 @@ def main():
         retrain(model, lossfunc, args, wandb)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser("cifar")
+    parser = argparse.ArgumentParser("Loss Function Search")
     # data
     parser.add_argument('--data', type=str, default='/data', help='location of the data corpus')
     parser.add_argument('--dataset', type=str, default='cifar10')
@@ -272,6 +263,8 @@ if __name__ == '__main__':
     # loss func setting
     parser.add_argument('--tau', type=float, default=0.1, help='tau')
     parser.add_argument('--num_states', type=int, default=11, help='num of operation states')
+    parser.add_argument('--noCEFormat', action='store_false', default=True, help='use SEARCHLOSS * -log(p_k)')
+
 
     # predictor setting
     parser.add_argument('--predictor_warm_up', type=int, default=2000, help='predictor warm-up steps')
@@ -286,24 +279,21 @@ if __name__ == '__main__':
 
     # loss function search
     parser.add_argument('--operator_size', type=int, default=8)
-    parser.add_argument('--loss_rejector_threshold', type=float, default=0.6, help='loss rejcetion threshold')
+    parser.add_argument('--loss_rejector_threshold', type=float, default=0.6, help='loss rejection threshold')
     parser.add_argument('--gumbel_scale', type=float, default=1, help='gumbel_scale')
     parser.add_argument('--num_obj', type=int, default=1,
-                        help='use multiple objective (acc + lambda * ece) for predictor trianing')
+                        help='use multiple objective (acc + lambda * ece) for predictor training')
     parser.add_argument('--predictor_lambda', type=float, default=None,
-                        help='use multiple objective (acc + lambda * ece) for predictor trianing')
+                        help='use multiple objective (acc + lambda * ece) for predictor training')
     parser.add_argument('--lfs_lambda', type=float, default=None,
                         help='use multiple objective (acc + lambda * ece) for loss function searching')
-
 
     # retrain
     parser.add_argument('--retrain_epochs', type=int, default=350, help='retrain epochs')
 
-
-
     args, unknown_args = parser.parse_known_args()
 
-    args.save = 'checkpoints/search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
+    args.save = 'checkpoints/search_retrain-n_state{}-{}'.format(args.num_states, np.random.randint(1000))
     utils.create_exp_dir(
         path=args.save,
         scripts_to_save=glob.glob('*.py') + glob.glob('module/**/*.py', recursive=True)

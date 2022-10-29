@@ -24,17 +24,16 @@ class MixedOp(nn.Module):
         else:
             return self._ops[idx](x1, x2)
 
-        # return sum(w * op(x) for w, op in zip(weights, self._ops))
-
 
 class LossFunc(nn.Module):
 
-    def __init__(self, num_states=11, tau=0.1):
+    def __init__(self, num_states=11, tau=0.1, noCEFormat=True):
         super(LossFunc, self).__init__()
         self.num_initial_state = 3  # 1, p_k, p_j
         self.states = []
         self.num_states = num_states
         self._tau = tau
+        self.noCEFormat = noCEFormat
 
         self._ops = nn.ModuleList()
         for i in range(num_states):
@@ -71,7 +70,12 @@ class LossFunc(nn.Module):
             s0, s1 = s1, self._ops[i](s0, s1, ops_weights[i], gumbel_training=gumbel_training)
             self.states.append(s1)
         nll = -logp_k
-        loss = self.states[-1] * nll
+        # output xxxx * -log(p_k) or not
+        if self.noCEFormat:
+            loss = self.states[-1]
+        else:
+            loss = self.states[-1] * nll
+
         if output_loss_array:
             return loss, nll
         return loss.sum(), nll.sum()
@@ -92,8 +96,6 @@ class LossFunc(nn.Module):
     def arch_weights_operators(self) -> Union[List[torch.tensor], torch.tensor]:
         return gumbel_softmax(self.alphas_operators, tau=self._tau, dim=-1, g=self.g_operators)
 
-
-
     def loss_str(self, return_records=False, no_gumbel=False):
         if no_gumbel:
             ops_weights = self.alphas_ops.data
@@ -106,20 +108,23 @@ class LossFunc(nn.Module):
             idx = ops_weights[i].argmax(dim=-1)
             op_list.append(PRIMITIVES[idx])
 
-
         s0, s1 = "p_k", "p_j"
         for index, op in enumerate(op_list):
             s0, s1 = self.op_str(op, s0, s1)
             states.append(s1)
+        if self.noCEFormat:
+            out_str = states[-1]
+        else:
+            out_str = "-({})*log(p_k)".format(states[-1])
         if return_records == True:
-            return "-({})*log(p_k)".format(states[-1]), states
-        return "-({})*log(p_k)".format(states[-1])
+            return out_str, states
+        return out_str
 
     def op_str(self, op, s0, s1):
         if op == 'add':
             s0, s1 = s1, "{} + {}".format(s0, s1)
         elif op == 'mul':
-            s0, s1 = s1, "{} * {}".format(s0, s1)
+            s0, s1 = s1, "mul({}, {})".format(s0, s1)
         elif op == 'iden1':
             s0, s1 = s1, s0
         elif op == 'one_plus':

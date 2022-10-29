@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="62192772-68dd-4279-ace7-57aa60d3102c" name="Artemis">
+        <fileTransfer accessType="SFTP" host="hpc.sydney.edu.au" port="22" sshConfigId="202af23b-256e-41c3-9ce2-83fd3ac5b929" sshConfig="Artemis">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+      <webServer id="4d0319b3-9257-4a22-8899-65733d46416d" name="Gadi">
+        <fileTransfer accessType="SFTP" host="gadi.nci.org.au" port="22" sshConfigId="ede14ba0-c7aa-41af-8440-6f7eecc2a5d7" sshConfig="Gadi">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

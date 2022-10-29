@@ -39,14 +39,14 @@ class LFS(object):
         # calculate loss
         loss = self.predictor_criterion(y_pred, y)
         # back-prop and optimization step
-        loss.backward()
+        loss.backward(retain_graph=True)
         self.predictor_optimizer.step()
         return y_pred, loss
 
     def step(self):
         self.lfs_optimizer.zero_grad()
         loss, y_pred = self._backward_step()
-        loss.backward()
+        loss.backward(retain_graph=True)
         self.lfs_optimizer.step()
         return loss, y_pred
 
