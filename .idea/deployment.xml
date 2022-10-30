@@ -1,22 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="Gadi" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="Lab1" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="Artemis">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/scratch/ContraGAN/projects/Focal-Loss-Search/" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="Gadi">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/scratch/li96/lt2442/Focal-Loss-Search" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
       <paths name="Lab1">
         <serverdata>
           <mappings>

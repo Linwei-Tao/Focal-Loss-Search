@@ -1,13 +1,9 @@
-# Neural Architecture Search in A Proxy Validation Loss Landscape
+# Calibration Loss Function Search
 
-> A PyTorch implementation for _Neural Architecture Search in A Proxy Validation Loss Landscape_. Licensed under the Apache License, Version 2.0.
->
-> **This project is based on [DARTS](https://github.com/quark0/darts).**
+> **This project is based on _Neural Architecture Search in A Proxy Validation Loss Landscape_.**
 
 ## Requirements
-```
-Python >= 3.7.5, PyTorch == 1.3.1, torchvision == 0.4.2
-```
+
 
 ## Instruction
 
@@ -17,11 +13,3 @@ Python >= 3.7.5, PyTorch == 1.3.1, torchvision == 0.4.2
 
 ## Citation
 If you use any part of this code in your research, please cite our paper:
-```
-@inproceedings{li2020neural,
-    title={Neural Architecture Search in A Proxy Validation Loss Landscape},
-    author={Li, Yanxi and Dong, Minjing and Wang, Yunhe and Xu, Chang},
-    booktitle={Proceedings of the 37th International Conference on Machine Learning},
-    year={2020}
-}
-```

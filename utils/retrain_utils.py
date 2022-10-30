@@ -24,7 +24,6 @@ import dataset.tiny_imagenet as tiny_imagenet
 from utils.train_utils import model_train
 from utils.valid_utils import model_valid
 
-
 dataset_loader = {
     'cifar10': cifar10,
     'cifar100': cifar100,
@@ -49,40 +48,43 @@ def retrain(net, lossfunc, args, wandb):
             root=args.data,
             split='train',
             batch_size=128,
-            pin_memory=True
+            pin_memory=True,
+            data_dir=args.data
         )
 
         val_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.data,
             split='val',
             batch_size=128,
-            pin_memory=True
+            pin_memory=True,
+            data_dir=args.data
         )
 
         test_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.data,
             split='val',
             batch_size=128,
-            pin_memory=True
+            pin_memory=True,
+            data_dir=args.data
         )
     else:
         train_loader, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
             batch_size=128,
             augment=True,
             random_seed=1,
-            pin_memory=True
+            pin_memory=True,
+            data_dir=args.data
         )
 
         test_loader = dataset_loader[args.dataset].get_test_loader(
             batch_size=128,
-            pin_memory=True
+            pin_memory=True,
+            data_dir=args.data
         )
 
-
     for epoch in range(num_epochs):
-        print("--" * 50)
-        print("Retrain Epoch: {}/{}".format(epoch + 1, num_epochs))
-        model_train(train_loader, net, lossfunc, optimizer, "Retrain", args, gumbel_training=False)
+        model_train(train_loader, net, lossfunc, optimizer, "Retrain Epoch: {}/{}".format(epoch + 1, num_epochs), args,
+                    gumbel_training=False)
 
         # test on test set
         retrain_test_pre_accuracy, retrain_test_pre_ece, retrain_test_pre_adaece, retrain_test_pre_cece, \
@@ -91,11 +93,19 @@ def retrain(net, lossfunc, args, wandb):
             test_loader, val_loader, net)
 
         wandb.log({
-            "retrain_test_pre_accuracy": retrain_test_pre_accuracy, "retrain_test_pre_ece": retrain_test_pre_ece,
-            "retrain_test_pre_adaece": retrain_test_pre_adaece, "retrain_test_pre_cece": retrain_test_pre_cece,
-            "retrain_test_pre_nll": retrain_test_pre_nll, "retrain_test_T_opt": retrain_test_T_opt,
-            "retrain_test_post_ece": retrain_test_post_ece, "retrain_test_post_adaece": retrain_test_post_adaece,
-            "retrain_test_post_cece": retrain_test_post_cece, "retrain_test_post_nll": retrain_test_post_nll,
-        }, step=epoch)
+            "retrain_test_pre_accuracy": retrain_test_pre_accuracy * 100,
+            "retrain_test_pre_ece": retrain_test_pre_ece * 100,
+            "retrain_test_pre_adaece": retrain_test_pre_adaece * 100,
+            "retrain_test_pre_cece": retrain_test_pre_cece * 100,
+            "retrain_test_pre_nll": retrain_test_pre_nll * 100, "retrain_test_T_opt": retrain_test_T_opt,
+            "retrain_test_post_ece": retrain_test_post_ece * 100,
+            "retrain_test_post_adaece": retrain_test_post_adaece * 100,
+            "retrain_test_post_cece": retrain_test_post_cece * 100,
+            "retrain_test_post_nll": retrain_test_post_nll * 100,
+        })
+
+        print("[Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(epoch + 1, num_epochs,
+                                                                              retrain_test_pre_accuracy,
+                                                                              retrain_test_pre_ece))
 
         scheduler.step()

@@ -143,8 +143,8 @@ def main():
             model_train(train_queue, model, lossfunc, optimizer,
                         name='Build Memory Epoch {}/{}'.format(epoch + 1, args.warm_up_population), args=args)
             # valid model
-            pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, post_cece, post_nll = model_valid(
-                valid_queue, valid_queue, model)
+            pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, \
+            post_cece, post_nll = model_valid(valid_queue, valid_queue, model)
             print('[Build Memory Epoch {}/{}] valid model-{} valid_nll={} valid_acc={} valid_ece={}'.format(epoch + 1,
                                                                                                             args.warm_up_population,
                                                                                                             epoch + 1,
@@ -170,10 +170,9 @@ def main():
                           num_obj=args.num_obj,
                           predictor_lambda=args.predictor_lambda).cuda()
 
-
     # -- build loss function searcher --
     lfs_criterion = MO_MSE(args.lfs_lambda) if args.num_obj > 1 else F.mse_loss
-    predictor_criterion = MO_MSE(args.lfs_lambda) if args.num_obj > 1 else F.mse_loss
+    predictor_criterion = MO_MSE(args.predictor_lambda) if args.num_obj > 1 else F.mse_loss
     lfs = LFS(
         lossfunc=lossfunc, model=model, momentum=args.momentum, weight_decay=args.weight_decay,
         lfs_learning_rate=args.lfs_learning_rate, lfs_weight_decay=args.lfs_weight_decay,
@@ -189,7 +188,7 @@ def main():
             pred_train_loss, (true_acc, true_ece), (pred_acc, pred_ece) = predictor_train(lfs, memory, args)
             if epoch % args.report_freq == 0 or epoch == args.predictor_warm_up:
                 print('[Warm up Predictor Epoch {}/{}]  loss={}'.format(epoch, args.predictor_warm_up,
-                                                                      pred_train_loss))
+                                                                        pred_train_loss))
                 acc_tau = kendalltau(true_acc.detach().to('cpu'), pred_acc.detach().to('cpu'))[0]
                 ece_tau = kendalltau(true_ece.detach().to('cpu'), pred_ece.detach().to('cpu'))[0]
                 print('acc kendall\'s-tau={} ece kendall\'s-tau={}'.format(acc_tau, ece_tau))
@@ -202,8 +201,6 @@ def main():
         # save predictor
         utils.save(lfs.predictor, os.path.join(args.save, 'predictor-warm-up.pt'))
 
-
-
     # --- Part 3 loss function search ---
     for epoch in range(args.search_epochs):
         # search
@@ -213,11 +210,12 @@ def main():
                    memory, args.gumbel_scale, args, epoch)
         wandb.config.update({"searched_loss_str": searched_loss_str}, allow_val_change=True)
         wandb.log({
-            "search_pre_valid_accuracy": pre_valid_accuracy*100, "search_pre_valid_ece": pre_valid_ece*100,
-            "search_pre_valid_adaece": pre_valid_adaece*100, "search_pre_valid_cece": pre_valid_cece*100,
-            "search_pre_valid_nll": pre_valid_nll*100, "search_T_opt": T_opt, "search_post_valid_ece": post_valid_ece*100,
-            "search_post_valid_adaece": post_valid_adaece*100,
-            "search_post_valid_cece": post_valid_cece*100, "search_post_valid_nll": post_valid_nll*100,
+            "search_pre_valid_accuracy": pre_valid_accuracy * 100, "search_pre_valid_ece": pre_valid_ece * 100,
+            "search_pre_valid_adaece": pre_valid_adaece * 100, "search_pre_valid_cece": pre_valid_cece * 100,
+            "search_pre_valid_nll": pre_valid_nll * 100, "search_T_opt": T_opt,
+            "search_post_valid_ece": post_valid_ece * 100,
+            "search_post_valid_adaece": post_valid_adaece * 100,
+            "search_post_valid_cece": post_valid_cece * 100, "search_post_valid_nll": post_valid_nll * 100,
         }, step=epoch)
         # save weights
         utils.save(model, os.path.join(args.save, 'model-weights-search.pt'))
@@ -264,7 +262,6 @@ if __name__ == '__main__':
     parser.add_argument('--tau', type=float, default=0.1, help='tau')
     parser.add_argument('--num_states', type=int, default=11, help='num of operation states')
     parser.add_argument('--noCEFormat', action='store_false', default=True, help='use SEARCHLOSS * -log(p_k)')
-
 
     # predictor setting
     parser.add_argument('--predictor_warm_up', type=int, default=2000, help='predictor warm-up steps')

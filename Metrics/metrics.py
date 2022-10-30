@@ -114,7 +114,7 @@ def l2_error(confs, preds, labels, num_bins=15):
     return l2_error
 
 
-def test_classification_net_logits(logits, labels):
+def test_classification_net_logits(logits: object, labels: object) -> object:
     '''
     This function reports classification accuracy and confusion matrix given logits and labels
     from a model.
