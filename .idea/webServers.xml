@@ -9,13 +9,6 @@
           </advancedOptions>
         </fileTransfer>
       </webServer>
-      <webServer id="4d0319b3-9257-4a22-8899-65733d46416d" name="Gadi">
-        <fileTransfer accessType="SFTP" host="gadi.nci.org.au" port="22" sshConfigId="ede14ba0-c7aa-41af-8440-6f7eecc2a5d7" sshConfig="Gadi">
-          <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
-          </advancedOptions>
-        </fileTransfer>
-      </webServer>
     </option>
   </component>
 </project>

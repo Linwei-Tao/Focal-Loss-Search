@@ -10,4 +10,4 @@
 * `train_search.py`: search and retrain for architectures;
 
 ## Citation
-If you use any part of this code in your research, please cite our paper:
+If you use any part of this code in your research, please cite our paper.

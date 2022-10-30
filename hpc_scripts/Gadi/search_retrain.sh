@@ -14,4 +14,4 @@
 module load python3/3.9.2
 module load pytorch/1.9.0
 cd /scratch/li96/lt2442/Focal-Loss-Search
-WANDB_MODE=offline python3 train_search.py --num_states=$NUM_STATES --num_obj=$NUM_OBJ --predictor_lambda=$PRED_LDA --lfs_lambda=$LFS_LDA --data=../datasets --noCEFormat=$NOCEFORMAT
+WANDB_MODE=offline python3 train_search.py --load_checkpoints --predictor_warm_up=5000 --num_states=$NUM_STATES --num_obj=$NUM_OBJ --predictor_lambda=$PRED_LDA --lfs_lambda=$LFS_LDA --data=../datasets

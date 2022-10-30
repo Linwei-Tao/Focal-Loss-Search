@@ -8,9 +8,6 @@
       <sshConfig authType="PASSWORD" host="gadi.nci.org.au" id="ede14ba0-c7aa-41af-8440-6f7eecc2a5d7" port="22" customName="Gadi" nameFormat="CUSTOM" username="lt2442" useOpenSSHConfig="true">
         <option name="customName" value="Gadi" />
       </sshConfig>
-      <sshConfig authType="PASSWORD" host="lab1.taolinwei.com" id="12dd8c75-3a64-4e3d-bf02-8393f9f86e16" port="22" customName="Lab1" nameFormat="CUSTOM" username="linwei" useOpenSSHConfig="true">
-        <option name="customName" value="Lab1" />
-      </sshConfig>
     </configs>
   </component>
 </project>

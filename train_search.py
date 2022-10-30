@@ -257,11 +257,12 @@ if __name__ == '__main__':
     # load setting
     parser.add_argument('--load_model', type=str, default=None, help='load model weights from file')
     parser.add_argument('--load_memory', type=str, default=None, help='load memory from file')
+    parser.add_argument('--load_checkpoints', action='store_true', default=False, help='use both model and memory')
 
     # loss func setting
     parser.add_argument('--tau', type=float, default=0.1, help='tau')
     parser.add_argument('--num_states', type=int, default=11, help='num of operation states')
-    parser.add_argument('--noCEFormat', action='store_false', default=True, help='use SEARCHLOSS * -log(p_k)')
+    parser.add_argument('--noCEFormat', action='store_true', default=False, help='not use SEARCHLOSS * -log(p_k)')
 
     # predictor setting
     parser.add_argument('--predictor_warm_up', type=int, default=2000, help='predictor warm-up steps')
@@ -290,11 +291,18 @@ if __name__ == '__main__':
 
     args, unknown_args = parser.parse_known_args()
 
-    args.save = 'checkpoints/search_retrain-n_state{}-{}'.format(args.num_states, np.random.randint(1000))
+    args.save = 'checkpoints/search_retrain-n_state{}-{}'.format(args.num_states, np.random.randint(100000))
     utils.create_exp_dir(
         path=args.save,
         scripts_to_save=glob.glob('*.py') + glob.glob('module/**/*.py', recursive=True)
     )
+
+    # load dir
+    if args.load_checkpoints:
+        args.load_model = 'checkpoints/n_states={}'.format(args.num_states)
+        args.load_memory = 'checkpoints/n_states={}'.format(args.num_states)
+
+
     wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args)
 
     main()
