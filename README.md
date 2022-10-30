@@ -7,9 +7,7 @@
 
 ## Instruction
 
-* `train_search.py`: search for architectures on CIFAR-10;
-* `train.py`: evaluate architectures on CIFAR-10;
-* `train_imagenet.py`: evaluate architectures on ImageNet.
+* `train_search.py`: search and retrain for architectures;
 
 ## Citation
 If you use any part of this code in your research, please cite our paper:
