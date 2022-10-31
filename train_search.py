@@ -2,7 +2,6 @@ import argparse
 import glob
 import wandb
 import os
-import time
 
 import numpy as np
 import torch

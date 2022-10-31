@@ -23,7 +23,6 @@ import dataset.tiny_imagenet as tiny_imagenet
 # Import train and validation utilities
 from utils.train_utils import model_train
 from utils.valid_utils import model_valid
-import utils
 
 dataset_loader = {
     'cifar10': cifar10,
@@ -108,6 +107,5 @@ def retrain(net, lossfunc, args, wandb):
         print("[Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(epoch + 1, num_epochs,
                                                                               retrain_test_pre_accuracy,
                                                                               retrain_test_pre_ece))
-        utils.save(net, os.path.join(args.save, 'model-weights-retrain.pt'))
 
         scheduler.step()
