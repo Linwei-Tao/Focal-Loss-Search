@@ -1,3 +1,4 @@
 /checkpoints/
+/checkpoints_hfai/
 /wandb/
 *.pyc

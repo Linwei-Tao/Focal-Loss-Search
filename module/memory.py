@@ -34,16 +34,13 @@ class Memory(object):
         ece = []
         batch = []
         for idx in indices:
-            weights.append(self.memory[idx].weights)
-            nll.append(self.memory[idx].nll)
-            ece.append(self.memory[idx].ece)
-            acc.append(self.memory[idx].acc)
+            weights.append(self.memory[idx].weights.cuda())
+            nll.append(self.memory[idx].nll.cuda())
+            ece.append(self.memory[idx].ece.cuda())
+            acc.append(self.memory[idx].acc.cuda())
             if len(nll) >= batch_size:
                 batch.append((torch.stack(weights), torch.stack(nll), torch.stack(acc), torch.stack(ece)))
-                weights = []
-                nll = []
-                acc = []
-                ece = []
+                return batch
         if len(nll) > 0: batch.append((torch.stack(weights), torch.stack(nll), torch.stack(acc), torch.stack(ece)))
         return batch
 

@@ -63,7 +63,7 @@ class Cutout(object):
         return img
 
 
-def data_transforms_cifar10(args):
+def data_transforms_cifar10():
     CIFAR_MEAN = [0.49139968, 0.48215827, 0.44653124]
     CIFAR_STD = [0.24703233, 0.24348505, 0.26158768]
 
@@ -73,8 +73,6 @@ def data_transforms_cifar10(args):
         transforms.ToTensor(),
         transforms.Normalize(CIFAR_MEAN, CIFAR_STD),
     ])
-    if args.cutout:
-        train_transform.transforms.append(Cutout(args.cutout_length))
 
     valid_transform = transforms.Compose([
         transforms.ToTensor(),
@@ -158,3 +156,21 @@ class MO_MSE(nn.Module):
         acc_loss = F.mse_loss(out[:, 0], target[:, 0])
         ece_loss = F.mse_loss(out[:, 1], target[:, 1])
         return acc_loss + self.lamda * ece_loss
+
+
+import torch
+import torch.distributed as dist
+
+
+@torch.no_grad()
+def concat_all_gather(tensor):
+    """
+    Performs all_gather operation on the provided tensors.
+    *** Warning ***: torch.distributed.all_gather has no gradient.
+    """
+    tensors_gather = [torch.ones_like(tensor)
+                      for _ in range(torch.distributed.get_world_size())]
+    torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+
+    output = torch.cat(tensors_gather, dim=0)
+    return output

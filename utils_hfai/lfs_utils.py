@@ -12,20 +12,26 @@ from utils_hfai.predictor_utils import predictor_train
 from utils_hfai import gumbel_like, pickle_save
 
 
-def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer, memory, gumbel_scale, args, epoch, rank, local_rank, start_step):
+def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer, memory, gumbel_scale, args, epoch,
+           rank, local_rank, start_step, loss_scaler, scheduler, save_path):
     # -- train model --
     # gumbel sampling and rejection process
+
     GOOD_LOSS = False
     while not GOOD_LOSS:
         lossfunc.g_ops = gumbel_like(lossfunc.alphas_ops) * gumbel_scale
         GOOD_LOSS, g_ops = loss_rejector.evaluate_loss(lossfunc.g_ops)
+
     if rank == 0 and local_rank == 0:
-        print("arch_weights_ops: ", lossfunc.arch_weights_ops())
-        print("gumbel_ops: ", lossfunc.g_ops)
         print("alpha_ops: ", F.softmax(lossfunc.alphas_ops, -1))
 
     # train model for one step
-    model_train(train_queue, model, lossfunc, optimizer, name='Searching {}/{}'.format(epoch+1, args.search_epochs), args=args, epoch=epoch, start_step=start_step)
+    model_train(train_queue, model, lossfunc, optimizer,
+                name='Searching {}/{}'.format(epoch + 1, args.search_epochs),
+                args=args, epoch=epoch, start_step=start_step,
+                loss_scaler=loss_scaler, local_rank=local_rank, save_path=save_path,
+                scheduler=scheduler, mode="search"
+                )
     # -- valid model --
     pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, post_cece, post_nll = model_valid(
         valid_queue, valid_queue, model)

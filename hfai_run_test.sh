@@ -1,0 +1,8 @@
+python train_search_hfai.py --device=0 --search_epochs=2 --retrain_epochs=2 --num_obj=2 --num_states=14 --predictor_lambda=25 --lfs_lambda=25 --predictor_warm_up=100 --warm_up_population=2 --seed=0 --data=hfai &
+python train_search_hfai.py --device=1 --search_epochs=2 --retrain_epochs=2 --num_obj=2 --num_states=14 --predictor_lambda=25 --lfs_lambda=25 --predictor_warm_up=100 --warm_up_population=2 --seed=1 --data=hfai &
+python train_search_hfai.py --device=2 --search_epochs=2 --retrain_epochs=2 --num_obj=2 --num_states=14 --predictor_lambda=25 --lfs_lambda=25 --predictor_warm_up=100 --warm_up_population=2 --seed=2 --data=hfai &
+python train_search_hfai.py --device=3 --search_epochs=2 --retrain_epochs=2 --num_obj=2 --num_states=14 --predictor_lambda=25 --lfs_lambda=25 --predictor_warm_up=100 --warm_up_population=2 --seed=3 --data=hfai &
+python train_search_hfai.py --device=4 --search_epochs=2 --retrain_epochs=2 --num_obj=2 --num_states=14 --predictor_lambda=25 --lfs_lambda=25 --predictor_warm_up=100 --warm_up_population=2 --seed=4 --data=hfai &
+python train_search_hfai.py --device=5 --search_epochs=2 --retrain_epochs=2 --num_obj=2 --num_states=14 --predictor_lambda=25 --lfs_lambda=25 --predictor_warm_up=100 --warm_up_population=2 --seed=5 --data=hfai &
+python train_search_hfai.py --device=6 --search_epochs=2 --retrain_epochs=2 --num_obj=2 --num_states=14 --predictor_lambda=25 --lfs_lambda=25 --predictor_warm_up=100 --warm_up_population=2 --seed=6 --data=hfai &
+python train_search_hfai.py --device=7 --search_epochs=2 --retrain_epochs=2 --num_obj=2 --num_states=14 --predictor_lambda=25 --lfs_lambda=25 --predictor_warm_up=100 --warm_up_population=2 --seed=7 --data=hfai

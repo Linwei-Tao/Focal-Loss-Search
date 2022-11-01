@@ -11,6 +11,7 @@ import numpy as np
 from torchvision import datasets
 from torchvision import transforms
 from torch.utils.data.sampler import SubsetRandomSampler
+import hfai
 
 
 def get_train_valid_loader(batch_size,
@@ -71,15 +72,20 @@ def get_train_valid_loader(batch_size,
         ])
 
     # load the dataset
-    train_dataset = datasets.CIFAR10(
-        root=data_dir, train=True,
-        download=True, transform=train_transform,
-    )
+    try:
+        train_dataset = hfai.datasets.CIFAR10('train', train_transform)
+        valid_dataset = hfai.datasets.CIFAR10('train', valid_transform)
+    except:
+        train_dataset = datasets.CIFAR10(
+            root=data_dir, train=True,
+            download=True, transform=train_transform,
+        )
 
-    valid_dataset = datasets.CIFAR10(
-        root=data_dir, train=True,
-        download=False, transform=valid_transform,
-    )
+        valid_dataset = datasets.CIFAR10(
+            root=data_dir, train=True,
+            download=False, transform=valid_transform,
+        )
+
 
     num_train = len(train_dataset)
     indices = list(range(num_train))
@@ -150,11 +156,13 @@ def get_test_loader(batch_size,
         transforms.ToTensor(),
         normalize,
     ])
-
-    dataset = datasets.CIFAR10(
-        root=data_dir, train=False,
-        download=True, transform=transform,
-    )
+    if data_dir == "hfai":
+        dataset = hfai.datasets.CIFAR10('test', transform)
+    else:
+        dataset = datasets.CIFAR10(
+            root=data_dir, train=False,
+            download=True, transform=transform,
+        )
 
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=shuffle,

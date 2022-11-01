@@ -14,6 +14,11 @@ def predictor_train(lfs, memory, args):
     all_pred_nll = []
     for weights, nll, acc, ece in batch:
         n = nll.size(0)
+        weights = weights.cuda(non_blocking=True)
+        nll = nll.cuda(non_blocking=True)
+        acc = acc.cuda(non_blocking=True)
+        ece = ece.cuda(non_blocking=True)
+
         if args.num_obj > 1:
             y_pred, predictor_train_loss = lfs.predictor_step(weights, torch.swapaxes(torch.stack([acc, ece]), 0, 1))
             pred_acc, pred_ece = y_pred[:, 0], y_pred[:, 1]

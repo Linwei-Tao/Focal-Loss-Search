@@ -25,7 +25,7 @@ class LossRejector(nn.Module):
     def evaluate_loss(self, g_ops):
         x, target = next(iter(self.train_queue))
         # data to CUDA
-        x = x.cuda().requires_grad_(False)
+        x = x.cuda(non_blocking=True).requires_grad_(False)
         target = target.cuda(non_blocking=True).requires_grad_(False)
         random_logits = self.model(x)
         random_prec1, random_prec5 = utils.accuracy(random_logits, target, topk=(1, 5))
@@ -67,7 +67,6 @@ class LossRejector(nn.Module):
             self.optimizer.step()
         learnd_prec1, learnd_prec5 = utils.accuracy(learnable_logits, target, topk=(1, 5))
         if learnd_prec1 / 100 > self.threshold:
-            print("Got One Loss with acc {:2f}%!!!  {}".format(learnd_prec1, self.lossfunc.loss_str()))
             return 1, g_ops
         else:
             return 0, None

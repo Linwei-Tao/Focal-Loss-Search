@@ -20,6 +20,8 @@ import dataset.cifar10 as cifar10
 import dataset.cifar100 as cifar100
 import dataset.tiny_imagenet as tiny_imagenet
 
+from module.resnet import resnet50
+
 # Import train and validation utilities
 from utils.train_utils import model_train
 from utils.valid_utils import model_valid
@@ -32,7 +34,10 @@ dataset_loader = {
 }
 
 
-def retrain(net, lossfunc, args, wandb):
+def retrain(lossfunc, args, wandb):
+    net = resnet50(num_classes=10)
+    net = net.cuda()
+
     num_epochs = args.retrain_epochs
 
     optimizer = optim.SGD(net.parameters(),
@@ -43,7 +48,6 @@ def retrain(net, lossfunc, args, wandb):
 
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250],
                                                gamma=0.1)
-
     if (args.dataset == 'tiny_imagenet'):
         train_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.data,

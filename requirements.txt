@@ -77,10 +77,10 @@ tensorboard-data-server==0.6.1
 tensorboard-plugin-wit==1.8.1
 timm==0.4.12
 tomli==2.0.1
-torch==1.13.0
+torch~=1.9.1+cu111
 torchaudio==0.13.0
 torchmetrics==0.10.1
-torchvision==0.14.0
+torchvision~=0.10.1+cu111
 tqdm==4.64.1
 treelib==1.6.1
 typing_extensions==4.4.0
@@ -89,4 +89,8 @@ Werkzeug==2.2.2
 yarl==1.8.1
 zipp==3.10.0
 zmq==0.0.0
-wandb
+wandb~=0.13.4
+scipy~=1.9.3
+hfai~=7.8.7.0+utils20221021.cu113.external
+sklearn~=0.0
+scikit-learn~=1.1.3
