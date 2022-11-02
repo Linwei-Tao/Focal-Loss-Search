@@ -156,14 +156,13 @@ def get_test_loader(batch_size,
         transforms.ToTensor(),
         normalize,
     ])
-    if data_dir == "hfai":
+    try:
         dataset = hfai.datasets.CIFAR10('test', transform)
-    else:
+    except:
         dataset = datasets.CIFAR10(
             root=data_dir, train=False,
             download=True, transform=transform,
         )
-
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=shuffle,
         num_workers=num_workers, pin_memory=pin_memory,

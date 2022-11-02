@@ -7,6 +7,7 @@ Test set size: 10000
 
 import torch
 import numpy as np
+import hfai
 
 from torchvision import datasets
 from torchvision import transforms
@@ -20,7 +21,8 @@ def get_train_valid_loader(batch_size,
                            shuffle=True,
                            num_workers=4,
                            pin_memory=False,
-                           get_val_temp=0):
+                           get_val_temp=0,
+                           data_dir='/data'):
     """
     Utility function for loading and returning train and valid
     multi-process iterators over the CIFAR-100 dataset. 
@@ -70,16 +72,20 @@ def get_train_valid_loader(batch_size,
         ])
 
     # load the dataset
-    data_dir = '/data'
-    train_dataset = datasets.CIFAR100(
-        root=data_dir, train=True,
-        download=True, transform=train_transform,
-    )
+    # load the dataset
+    try:
+        train_dataset = hfai.datasets.CIFAR100('train', train_transform)
+        valid_dataset = hfai.datasets.CIFAR100('train', valid_transform)
+    except:
+        train_dataset = datasets.CIFAR100(
+            root=data_dir, train=True,
+            download=True, transform=train_transform,
+        )
 
-    valid_dataset = datasets.CIFAR100(
-        root=data_dir, train=True,
-        download=False, transform=valid_transform,
-    )
+        valid_dataset = datasets.CIFAR100(
+            root=data_dir, train=True,
+            download=False, transform=valid_transform,
+        )
 
     num_train = len(train_dataset)
     indices = list(range(num_train))
@@ -123,7 +129,8 @@ def get_train_valid_loader(batch_size,
 def get_test_loader(batch_size,
                     shuffle=True,
                     num_workers=4,
-                    pin_memory=False):
+                    pin_memory=False,
+                    data_dir="/data"):
     """
     Utility function for loading and returning a multi-process
     test iterator over the CIFAR-100 dataset.
@@ -151,11 +158,13 @@ def get_test_loader(batch_size,
         normalize,
     ])
 
-    data_dir = '/data'
-    dataset = datasets.CIFAR100(
-        root=data_dir, train=False,
-        download=True, transform=transform,
-    )
+    try:
+        dataset = hfai.datasets.CIFAR100('test', transform)
+    except:
+        dataset = datasets.CIFAR100(
+            root=data_dir, train=False,
+            download=True, transform=transform,
+        )
 
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=shuffle,

@@ -11,6 +11,7 @@ from torch.nn import functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, SubsetRandomSampler
 import torchvision
+import glob
 
 from module.loss_searcher import LFS
 from module.memory import Memory
@@ -36,12 +37,22 @@ import dataset.cifar10 as cifar10
 import dataset.cifar100 as cifar100
 import dataset.tiny_imagenet as tiny_imagenet
 
-from module.resnet import resnet50
+# Import network models
+from module.resnet import resnet50, resnet110
+from module.resnet_tiny_imagenet import resnet50 as resnet50_ti
+from module.wide_resnet import wide_resnet_cifar
+from module.densenet import densenet121
 
 # Import train and validation utilities
 from utils.train_utils import model_train
 from utils.valid_utils import model_valid
 import utils
+
+dataset_num_classes = {
+    'cifar10': 10,
+    'cifar100': 100,
+    'tiny_imagenet': 200
+}
 
 dataset_loader = {
     'cifar10': cifar10,
@@ -49,7 +60,13 @@ dataset_loader = {
     'tiny_imagenet': tiny_imagenet
 }
 
-CIFAR_CLASSES = 10
+models = {
+    'resnet50': resnet50,
+    'resnet50_ti': resnet50_ti,
+    'resnet110': resnet110,
+    'wide_resnet': wide_resnet_cifar,
+    'densenet121': densenet121
+}
 
 
 def main():
@@ -64,7 +81,8 @@ def main():
     print("args = %s", args)
 
     # build model
-    model = resnet50(num_classes=CIFAR_CLASSES).cuda()
+    num_classes = dataset_num_classes[args.dataset]
+    model = models[args.model](num_classes=num_classes).cuda()
     wandb.config.model_size = utils.count_parameters_in_MB(model)
     wandb.config.searched_loss_str = 0
 
@@ -78,11 +96,17 @@ def main():
 
     # construct data transformer (including normalization, augmentation)
     train_transform, valid_transform = utils.data_transforms_cifar10(args)
-    # load CIFAR10 data training set (train=True)
+    # load dataset
     try:
-        train_data = hfai.datasets.CIFAR10('train', train_transform)
+        if args.dataset == "cifar10": train_data = hfai.datasets.CIFAR10('train', train_transform)
+        elif args.dataset == "cifar100": train_data = hfai.datasets.CIFAR10('train', train_transform)
+        # To-Do: current tiny_imagenet is not available
+        elif args.dataset == "tiny_imagenet": train_data = tiny_imagenet.get_dataset("dataset/tiny-imagenet-200/", 'train')
     except:
-        train_data = torchvision.datasets.CIFAR10(args.data, train=True, transform=train_transform)
+        if args.dataset == "cifar10": train_data = torchvision.datasets.CIFAR10(args.data, train=True, transform=train_transform)
+        elif args.dataset == "cifar100": train_data = torchvision.datasets.CIFAR100(args.data, train=True, transform=train_transform)
+        elif args.dataset == "tiny_imagenet": train_data = tiny_imagenet.get_dataset("dataset/tiny-imagenet-200/", 'train')
+
 
     # generate data indices
     num_train = len(train_data)
@@ -101,6 +125,22 @@ def main():
         train_data, batch_size=args.batch_size, sampler=SubsetRandomSampler(indices[split:num_train]),
         pin_memory=True, num_workers=args.num_workers
     )
+
+    # With following scripts, we use 90000 for training and 10000 for validation; otherwise, 45000 for training and 45000 for validation (Following NAS Setting)
+    # if (args.dataset == 'tiny_imagenet'):
+    #     train_queue = dataset_loader[args.dataset].get_data_loader(
+    #         root="dataset/tiny-imagenet-200/",
+    #         split='train',
+    #         batch_size=128,
+    #         pin_memory=True,
+    #     )
+    #
+    #     valid_queue = dataset_loader[args.dataset].get_data_loader(
+    #         root="dataset/tiny-imagenet-200/",
+    #         split='val',
+    #         batch_size=128,
+    #         pin_memory=True,
+    #     )
 
     # learning rate scheduler (with cosine annealing)
     scheduler = CosineAnnealingLR(optimizer, int(args.search_epochs), eta_min=args.learning_rate_min)
@@ -151,8 +191,11 @@ def main():
             # warm-up
             lossfunc.g_ops = warm_up_gumbel[epoch]
             print("Objective function: %s" % (lossfunc.loss_str()))
-            objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer, name='Warm Up Epoch {}/{}'.format(epoch + 1, args.warm_up_population), args=args)
-            print('[Warm Up Epoch {}/{}] searched loss={} top1-acc={} nll={}'.format(epoch + 1, args.warm_up_population, objs, top1, nll))
+            objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer,
+                                                name='Warm Up Epoch {}/{}'.format(epoch + 1, args.warm_up_population),
+                                                args=args)
+            print('[Warm Up Epoch {}/{}] searched loss={} top1-acc={} nll={}'.format(epoch + 1, args.warm_up_population,
+                                                                                     objs, top1, nll))
 
             # store warmup checkpoint
             state = {
@@ -188,7 +231,8 @@ def main():
             # log function
             print("Objective function: %s" % (lossfunc.loss_str()))
             # train model for one step
-            model_train(train_queue, model, lossfunc, optimizer, name='Build Memory Epoch {}/{}'.format(epoch + 1, args.warm_up_population), args=args)
+            model_train(train_queue, model, lossfunc, optimizer,
+                        name='Build Memory Epoch {}/{}'.format(epoch + 1, args.warm_up_population), args=args)
             # valid model
             pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, \
             post_cece, post_nll = model_valid(valid_queue, valid_queue, model)
@@ -305,39 +349,50 @@ def main():
 
     # --- Part 4 retrain on searched loss ---
     if args.retrain_epochs > 0:
-        net = resnet50(num_classes=10)
-        net = net.cuda()
-        optimizer = torch.optim.SGD(net.parameters(),
+        # build model
+        num_classes = dataset_num_classes[args.dataset]
+        model = models[args.model](num_classes=num_classes).cuda()
+
+        optimizer = torch.optim.SGD(model.parameters(),
                                     lr=0.1,
                                     momentum=0.9,
                                     weight_decay=5e-4,
                                     nesterov=False)
 
+
+
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250],
                                                          gamma=0.1)
+
+        if args.dataset =='tiny_imagenet':
+            optimizer = torch.optim.SGD(model.parameters(),
+                                        lr=0.1,
+                                        momentum=0.9,
+                                        weight_decay=5e-4,
+                                        nesterov=False)
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[40, 60],
+                                                             gamma=0.1)
+
         if (args.dataset == 'tiny_imagenet'):
             train_loader = dataset_loader[args.dataset].get_data_loader(
-                root=args.data,
+                root="dataset/tiny-imagenet-200/",
                 split='train',
-                batch_size=128,
+                batch_size=64,
                 pin_memory=True,
-                data_dir=args.data
             )
 
             val_loader = dataset_loader[args.dataset].get_data_loader(
-                root=args.data,
+                root="dataset/tiny-imagenet-200/",
                 split='val',
                 batch_size=128,
                 pin_memory=True,
-                data_dir=args.data
             )
 
             test_loader = dataset_loader[args.dataset].get_data_loader(
-                root=args.data,
+                root="dataset/tiny-imagenet-200/",
                 split='val',
                 batch_size=128,
                 pin_memory=True,
-                data_dir=args.data
             )
         else:
             train_loader, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
@@ -364,8 +419,8 @@ def main():
             print(f"*********** Successfully continue retrain form epoch {start_epoch}.***********")
 
         for epoch in range(start_epoch, args.retrain_epochs):
-            model_train(train_loader, net, lossfunc, optimizer,
-                        "Retrain Epoch: {}/{}".format(epoch + 1, args.retrain_epochs),
+            model_train(train_loader, model, lossfunc, optimizer,
+                        "[{}] Retrain Epoch: {}/{}".format(args.device, epoch + 1, args.retrain_epochs),
                         args,
                         gumbel_training=False)
 
@@ -373,7 +428,7 @@ def main():
             retrain_test_pre_accuracy, retrain_test_pre_ece, retrain_test_pre_adaece, retrain_test_pre_cece, \
             retrain_test_pre_nll, retrain_test_T_opt, retrain_test_post_ece, retrain_test_post_adaece, \
             retrain_test_post_cece, retrain_test_post_nll = model_valid(
-                test_loader, val_loader, net)
+                test_loader, val_loader, model)
 
             wandb.log({
                 "retrain_test_pre_accuracy": retrain_test_pre_accuracy * 100,
@@ -390,7 +445,7 @@ def main():
             print("[Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(epoch + 1, args.retrain_epochs,
                                                                                   retrain_test_pre_accuracy,
                                                                                   retrain_test_pre_ece))
-            utils.save(net, os.path.join(args.save, 'model-weights-retrain.pt'))
+            utils.save(model, os.path.join(args.save, 'model-weights-retrain.pt'))
             # store search checkpoint
             state = {
                 'model': model.state_dict(),
@@ -404,6 +459,9 @@ def main():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("Loss Function Search")
+    # model
+    parser.add_argument('--model', type=str, default='resnet50')
+
     # data
     parser.add_argument('--data', type=str, default='/data', help='location of the data corpus')
     parser.add_argument('--dataset', type=str, default='cifar10')
@@ -411,9 +469,6 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4, help='number of data loader workers')
     parser.add_argument('--cutout', action='store_true', default=False, help='use cutout')
     parser.add_argument('--cutout_length', type=int, default=16, help='cutout length')
-    # save
-    parser.add_argument('--save', type=str, default='EXP', help='experiment name')
-    parser.add_argument('--model_path', type=str, default='saved_models', help='path to save the model')
 
     # training setting
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
@@ -422,12 +477,12 @@ if __name__ == '__main__':
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
     parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
-    parser.add_argument('--search_epochs', type=int, default=200, help='num of searching epochs')
     parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
 
     # search setting
     parser.add_argument('--lfs_learning_rate', type=float, default=1e-1, help='learning rate for arch encoding')
     parser.add_argument('--lfs_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
+    parser.add_argument('--search_epochs', type=int, default=200, help='num of searching epochs')
 
     # load setting
     parser.add_argument('--load_model', type=str, default=None, help='load model weights from file')
@@ -447,10 +502,7 @@ if __name__ == '__main__':
     parser.add_argument('--memory_size', type=int, default=100, help='size of memory to train predictor')
     parser.add_argument('--warm_up_population', type=int, default=100, help='warm_up_population')
 
-    # others
-    parser.add_argument('--seed', type=int, default=1, help='random seed')
-
-    # loss function search
+    # loss function search (LFS) setting
     parser.add_argument('--operator_size', type=int, default=8)
     parser.add_argument('--loss_rejector_threshold', type=float, default=0.6, help='loss rejection threshold')
     parser.add_argument('--gumbel_scale', type=float, default=1, help='gumbel_scale')
@@ -461,37 +513,46 @@ if __name__ == '__main__':
     parser.add_argument('--lfs_lambda', type=float, default=None,
                         help='use multiple objective (acc + lambda * ece) for loss function searching')
 
-    # retrain
+    # retrain setting
     parser.add_argument('--retrain_epochs', type=int, default=350, help='retrain epochs')
 
-    # gpu
-    parser.add_argument('--device', type=int, default=0)
-
-    # wandb
-    parser.add_argument('--wandb_mode', type=str, default="offline")
-    # train_platform
-    parser.add_argument('--platform', type=str, default='hfai')
+    # others
+    parser.add_argument('--seed', type=int, default=1, help='random seed')  # seed
+    parser.add_argument('--device', type=int, default=0)  # gpu
+    parser.add_argument('--wandb_mode', type=str, default="offline")  # wandb
+    parser.add_argument('--platform', type=str, default='hfai')  # train_platform
 
     args, unknown_args = parser.parse_known_args()
     try:
         args.save = 'checkpoints/{}-{}-{}'.format(os.environ["MARSV2_NB_NAME"], os.environ["MARSV2_TASK_ID"],
                                                   args.device)
     except:
-        args.save = 'checkpoints/{}-{}-{}'.format("TEST", 2, args.device)
+        args.save = 'checkpoints/{}-{}-{}'.format("TEST", np.random.randint(100000), args.device)
 
+    print("os.getcwd()", os.getcwd())
+
+    utils.create_exp_dir(
+        path=args.save,
+        scripts_to_save=glob.glob('*.py') + glob.glob('module/**/*.py', recursive=True)
+    )
     args.save_path = Path(args.save)
     args.save_path.mkdir(exist_ok=True, parents=True)
 
     # set current device
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device)
-    os.environ['WANDB_MODE'] = args.wandb_mode
+    os.environ['WANDB_MODE'] = "offline"
 
     # load dir
     if args.load_checkpoints:
         args.load_model = 'checkpoints/n_states={}'.format(args.num_states)
         args.load_memory = 'checkpoints/n_states={}'.format(args.num_states)
 
+    print("os.getcwd()", os.getcwd())
+
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
     wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args)
 
+
+    print("wandb.run.dir", wandb.run.dir)
+    print("os.getcwd()", os.getcwd())
     main()

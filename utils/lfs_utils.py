@@ -26,7 +26,7 @@ def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimi
     print("alpha_ops: ", F.softmax(lossfunc.alphas_ops, -1))
 
     # train model for one step
-    model_train(train_queue, model, lossfunc, optimizer, name='Searching {}/{}'.format(epoch+1, args.search_epochs), args=args)
+    model_train(train_queue, model, lossfunc, optimizer, name='[{}] Searching {}/{}'.format(args.device, epoch+1, args.search_epochs), args=args)
     # -- valid model --
     pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, post_cece, post_nll = model_valid(
         valid_queue, valid_queue, model)

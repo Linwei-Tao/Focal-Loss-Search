@@ -7,16 +7,11 @@ Number of classes: 200
 Link: https://tiny-imagenet.herokuapp.com/
 """
 
-import os
 import torch
-import numpy as numpy
 
-from torchvision import datasets
 from torchvision import transforms
 from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
 
-from torch.utils.data.sampler import SubsetRandomSampler
 
 import os
 import glob
@@ -173,3 +168,40 @@ def get_data_loader(root,
     )
 
     return data_loader
+
+def get_dataset(root, split='train'):
+
+
+    normalize = transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
+    )
+
+    val_test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            normalize
+    ])
+
+    train_transform = transforms.Compose([
+            transforms.RandomCrop(64, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize
+    ])
+
+    # load the dataset
+    data_dir = root
+
+    if (split == 'train'):
+        dataset = TinyImageNet(data_dir,
+                               split='train',
+                               transform=train_transform,
+                               in_memory=True)
+    else:
+        dataset = TinyImageNet(data_dir,
+                               split='val',
+                               transform=val_test_transform,
+                               in_memory=True)
+
+
+    return dataset
