@@ -2,3 +2,4 @@
 *.pyc
 /dataset/tiny-imagenet-200/
 /__pycache__/
+/wandb/
