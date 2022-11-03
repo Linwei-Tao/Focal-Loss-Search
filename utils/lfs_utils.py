@@ -21,9 +21,8 @@ def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimi
         lossfunc.g_ops = gumbel_like(lossfunc.alphas_ops) * gumbel_scale
         GOOD_LOSS, g_ops = loss_rejector.evaluate_loss(lossfunc.g_ops)
 
-    print("arch_weights_ops: ", lossfunc.arch_weights_ops())
-    print("gumbel_ops: ", lossfunc.g_ops)
-    print("alpha_ops: ", F.softmax(lossfunc.alphas_ops, -1))
+    print("softmax(alpha_ops): ", F.softmax(lossfunc.alphas_ops, -1))
+    print(f"alpha_ops loss: {lossfunc.loss_str(no_gumbel=True)}: ", lossfunc.alphas_ops)
 
     # train model for one step
     model_train(train_queue, model, lossfunc, optimizer, name='[{}] Searching {}/{}'.format(args.device, epoch+1, args.search_epochs), args=args)

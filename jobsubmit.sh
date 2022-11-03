@@ -10,7 +10,8 @@ for DATASET in "${DATASETS[@]}"
       do
         for NSTATE in "${N_STATES[@]}"
           do
-               hfai bash hfai_run.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+               hfai bash hfai_run.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain_noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+#               hfai stop Search_Retrain_noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}"
           done
       done
   done
@@ -22,7 +23,8 @@ for DATASET in "${DATASETS[@]}"
       do
         for NSTATE in "${N_STATES[@]}"
           do
-              hfai bash hfai_run_ceformat.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+              hfai bash hfai_run_ceformat.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+#              hfai stop Search_Retrain_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}"
           done
       done
   done

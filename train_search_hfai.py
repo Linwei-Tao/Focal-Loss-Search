@@ -525,12 +525,10 @@ if __name__ == '__main__':
 
     args, unknown_args = parser.parse_known_args()
     try:
-        args.save = 'checkpoints/{}-{}-{}'.format(os.environ["MARSV2_NB_NAME"], os.environ["MARSV2_TASK_ID"],
-                                                  args.device)
+        args.save = 'checkpoints/{}-{}'.format(os.environ["MARSV2_NB_NAME"], args.device)
     except:
-        args.save = 'checkpoints/{}-{}-{}'.format("TEST", 1244, args.device)
+        args.save = 'checkpoints/{}-{}'.format(1244, args.device)
 
-    print("os.getcwd()", os.getcwd())
 
     args.save_path = Path(args.save)
     args.save_path.mkdir(exist_ok=True, parents=True)
@@ -545,7 +543,7 @@ if __name__ == '__main__':
         args.load_memory = 'checkpoints/n_states={}'.format(args.num_states)
 
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}-{}".format(os.environ["MARSV2_NB_NAME"], os.environ["MARSV2_TASK_ID"], args.device))
+    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device))
 
     print("wandb.run.dir", wandb.run.dir)
     main()
