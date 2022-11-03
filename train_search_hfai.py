@@ -164,20 +164,21 @@ def main():
     else:
         # 1.1.1 sample cells for warm-up
         # load from checkpoint
-        if (args.save_path / 'gumbel-warm-up.pickle').exists():
-            warm_up_gumbel = utils.pickle_load(os.path.join(args.save, 'gumbel-warm-up.pickle'))
-            print("*********** Successfully load warm_up_gumbel *********** ")
-        else:
-            warm_up_gumbel = []
-            while len(warm_up_gumbel) < args.warm_up_population:
-                g_ops = gumbel_like(lossfunc.alphas_ops)
-                flag, g_ops = loss_rejector.evaluate_loss(g_ops)
-                if flag:
-                    warm_up_gumbel.append(g_ops)
-                    print(f"GOT ONE GOOD LOSS! {lossfunc.loss_str()}")
-            utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel-warm-up.pickle'))
+        warm_up_gumbel = []
+        if (args.save_path / 'gumbel_warmup_latest.pickle').exists():
+            warm_up_gumbel = utils.pickle_load(os.path.join(args.save, 'gumbel_warmup_latest.pickle'))
+            print(f"*********** Successfully continue gumbel warmup.*********** ")
 
-        # 1.1.2 warm up
+        while len(warm_up_gumbel) <= args.warm_up_population:
+            g_ops = gumbel_like(lossfunc.alphas_ops)
+            flag, g_ops = loss_rejector.evaluate_loss(g_ops)
+            if flag:
+                warm_up_gumbel.append(g_ops)
+                print(f"GOT {len(warm_up_gumbel)} GOOD LOSS! {lossfunc.loss_str()}")
+                utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel_warmup_latest.pickle'))
+
+
+        # 1.1.2 warm up model with proposed loss
         start_epoch = 0
         if (args.save_path / 'warmup_latest.pt').exists():
             ckpt = torch.load(args.save_path / 'warmup_latest.pt', map_location='cpu')
@@ -442,7 +443,7 @@ def main():
                 "retrain_test_post_nll": retrain_test_post_nll * 100,
             })
 
-            print("[Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(epoch + 1, args.retrain_epochs,
+            print("[[{}] Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(args.device, epoch + 1, args.retrain_epochs,
                                                                                   retrain_test_pre_accuracy,
                                                                                   retrain_test_pre_ece))
             utils.save(model, os.path.join(args.save, 'model-weights-retrain.pt'))
@@ -527,32 +528,24 @@ if __name__ == '__main__':
         args.save = 'checkpoints/{}-{}-{}'.format(os.environ["MARSV2_NB_NAME"], os.environ["MARSV2_TASK_ID"],
                                                   args.device)
     except:
-        args.save = 'checkpoints/{}-{}-{}'.format("TEST", np.random.randint(100000), args.device)
+        args.save = 'checkpoints/{}-{}-{}'.format("TEST", 1244, args.device)
 
     print("os.getcwd()", os.getcwd())
 
-    utils.create_exp_dir(
-        path=args.save,
-        scripts_to_save=glob.glob('*.py') + glob.glob('module/**/*.py', recursive=True)
-    )
     args.save_path = Path(args.save)
     args.save_path.mkdir(exist_ok=True, parents=True)
 
     # set current device
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device)
-    os.environ['WANDB_MODE'] = "offline"
+    os.environ['WANDB_MODE'] = args.wandb_mode
 
     # load dir
     if args.load_checkpoints:
         args.load_model = 'checkpoints/n_states={}'.format(args.num_states)
         args.load_memory = 'checkpoints/n_states={}'.format(args.num_states)
 
-    print("os.getcwd()", os.getcwd())
-
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args)
-
+    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}-{}".format(os.environ["MARSV2_NB_NAME"], os.environ["MARSV2_TASK_ID"], args.device))
 
     print("wandb.run.dir", wandb.run.dir)
-    print("os.getcwd()", os.getcwd())
     main()
