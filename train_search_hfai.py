@@ -178,34 +178,34 @@ def main():
                 utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel_warmup_latest.pickle'))
 
 
-        # 1.1.2 warm up model with proposed loss
-        start_epoch = 0
-        if (args.save_path / 'warmup_latest.pt').exists():
-            ckpt = torch.load(args.save_path / 'warmup_latest.pt', map_location='cpu')
-            model.load_state_dict(ckpt['model'])
-            optimizer.load_state_dict(ckpt['optimizer'])
-            scheduler.load_state_dict(ckpt['scheduler'])
-            start_epoch = ckpt['epoch']
-            print(f"*********** Successfully continue warmup form epoch {start_epoch}.*********** ")
+    # 1.1.2 warm up model with proposed loss
+    start_epoch = 0
+    if (args.save_path / 'warmup_latest.pt').exists():
+        ckpt = torch.load(args.save_path / 'warmup_latest.pt', map_location='cpu')
+        model.load_state_dict(ckpt['model'])
+        optimizer.load_state_dict(ckpt['optimizer'])
+        scheduler.load_state_dict(ckpt['scheduler'])
+        start_epoch = ckpt['epoch']
+        print(f"*********** Successfully continue warmup form epoch {start_epoch}.*********** ")
 
-        for epoch in range(start_epoch, len(warm_up_gumbel)):
-            # warm-up
-            lossfunc.g_ops = warm_up_gumbel[epoch]
-            print("Objective function: %s" % (lossfunc.loss_str()))
-            objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer,
-                                                name='Warm Up Epoch {}/{}'.format(epoch + 1, args.warm_up_population),
-                                                args=args)
-            print('[Warm Up Epoch {}/{}] searched loss={} top1-acc={} nll={}'.format(epoch + 1, args.warm_up_population,
-                                                                                     objs, top1, nll))
+    for epoch in range(start_epoch, len(warm_up_gumbel)):
+        # warm-up
+        lossfunc.g_ops = warm_up_gumbel[epoch]
+        print("Objective function: %s" % (lossfunc.loss_str()))
+        objs, top1, top5, nll = model_train(train_queue, model, lossfunc, optimizer,
+                                            name='Warm Up Epoch {}/{}'.format(epoch + 1, args.warm_up_population),
+                                            args=args)
+        print('[Warm Up Epoch {}/{}] searched loss={} top1-acc={} nll={}'.format(epoch + 1, args.warm_up_population,
+                                                                                 objs, top1, nll))
 
-            # store warmup checkpoint
-            state = {
-                'model': model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'scheduler': scheduler.state_dict(),
-                'epoch': epoch + 1,
-            }
-            torch.save(state, os.path.join(args.save, 'warmup_latest.pt'))
+        # store warmup checkpoint
+        state = {
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'epoch': epoch + 1,
+        }
+        torch.save(state, os.path.join(args.save, 'warmup_latest.pt'))
 
     # 1.2 build memory (i.e. valid model)
     if args.load_memory is not None:
@@ -323,6 +323,9 @@ def main():
         post_valid_adaece, post_valid_cece, post_valid_nll, gumbel_loss_str, searched_loss_str = \
             search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimizer,
                    memory, args.gumbel_scale, args, epoch)
+
+        print("softmax(alpha_ops): ", F.softmax(lossfunc.alphas_ops, -1))
+        print(f"alpha_ops loss: {lossfunc.loss_str(no_gumbel=True)}: ", lossfunc.alphas_ops)
         wandb.config.update({"searched_loss_str": searched_loss_str}, allow_val_change=True)
         wandb.log({
             "search_pre_valid_accuracy": pre_valid_accuracy * 100, "search_pre_valid_ece": pre_valid_ece * 100,
@@ -492,7 +495,7 @@ if __name__ == '__main__':
 
     # loss func setting
     parser.add_argument('--tau', type=float, default=0.1, help='tau')
-    parser.add_argument('--num_states', type=int, default=11, help='num of operation states')
+    parser.add_argument('--num_states', type=int, default=14, help='num of operation states')
     parser.add_argument('--noCEFormat', action='store_true', default=False, help='not use SEARCHLOSS * -log(p_k)')
 
     # predictor setting
@@ -542,8 +545,14 @@ if __name__ == '__main__':
         args.load_model = 'checkpoints/n_states={}'.format(args.num_states)
         args.load_memory = 'checkpoints/n_states={}'.format(args.num_states)
 
+
+    args.retrain_epochs = 100 if args.dataset =='tiny_imagenet' else 350
+
+
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
     wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device))
 
     print("wandb.run.dir", wandb.run.dir)
     main()
+
+

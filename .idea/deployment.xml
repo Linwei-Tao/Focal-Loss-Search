@@ -3,44 +3,10 @@
   <component name="PublishConfigData" autoUpload="Always" serverName="Lab2" exclude=".svn;.cvs;.idea;.DS_Store;.git;.hg;*.hprof;*.pyc;" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="Artemis">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/scratch/ContraGAN/projects/Focal-Loss-Search" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="Gadi">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/scratch/li96/lt2442/Focal-Loss-Search" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-          <excludedPaths>
-            <excludedPath local="true" path="$PROJECT_DIR$/checkpoints" />
-          </excludedPaths>
-        </serverdata>
-      </paths>
       <paths name="Lab1">
         <serverdata>
           <mappings>
             <mapping deploy="/mnt/LFS" local="$PROJECT_DIR$" />
-          </mappings>
-          <excludedPaths>
-            <excludedPath local="true" path="$PROJECT_DIR$/checkpoints" />
-          </excludedPaths>
-        </serverdata>
-      </paths>
-      <paths name="Lab1 (lfs)">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/mnt/LFS" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="Lab2">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/mnt/LFS" local="$PROJECT_DIR$" web="/" />
           </mappings>
           <excludedPaths>
             <excludedPath local="true" path="$PROJECT_DIR$/checkpoints" />
