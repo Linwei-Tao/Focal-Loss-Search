@@ -80,22 +80,14 @@ def main():
 
     print("args = %s", args)
 
-
-    # loss function
-    lossfunc = LossFunc(num_states=args.num_states, tau=args.tau, noCEFormat=args.noCEFormat)
-
-
     # --- load searched loss ---
-    if (checkpoint_path / 'search_latest.pt').exists():
-        ckpt = torch.load(checkpoint_path / 'search_latest.pt', map_location='cpu')
-        print(f"*********** loss {lossfunc.loss_str(no_gumbel=True)}.*********** ")
-        lossfunc.load_state_dict(ckpt['lossfunc'])
-        print(f"*********** Successfully load search loss {lossfunc.loss_str(no_gumbel=True)}.*********** ")
-        print(lossfunc.alphas_ops.shape)
-        wandb.config.searched_loss_str = lossfunc.loss_str(no_gumbel=True)
     if (checkpoint_path / 'lossfunc_latest.pickle').exists():
         lossfunc = utils.pickle_load(os.path.join(args.load_checkpoints, 'lossfunc_latest.pickle'))
-        print(f"*********** Successfully continue gumbel warmup.*********** ")
+        wandb.config.update({"searched_loss_str": lossfunc.loss_str(no_gumbel=True)}, allow_val_change=True)
+        print(f"*********** Successfully continue lossfunc: {lossfunc.loss_str(no_gumbel=True)}.*********** ")
+    else:
+        print(f"No loss found!")
+
 
 
     # --- retrain on searched loss ---
@@ -194,7 +186,6 @@ def main():
             print("[[{}] Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(args.device, epoch + 1, args.retrain_epochs,
                                                                                        retrain_test_pre_accuracy,
                                                                                        retrain_test_pre_ece))
-            utils.save(model, os.path.join(args.save, 'model-weights-retrain.pt'))
             # store search checkpoint
             state = {
                 'model': model.state_dict(),
@@ -222,11 +213,6 @@ if __name__ == '__main__':
 
     # load setting
     parser.add_argument('--load_checkpoints', type=str, default=None)
-
-    # loss func setting
-    parser.add_argument('--tau', type=float, default=0.1, help='tau')
-    parser.add_argument('--num_states', type=int, default=14, help='num of operation states')
-    parser.add_argument('--noCEFormat', action='store_true', default=False, help='not use SEARCHLOSS * -log(p_k)')
 
     # others
     parser.add_argument('--seed', type=int, default=1, help='random seed')  # seed

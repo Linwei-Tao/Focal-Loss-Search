@@ -303,8 +303,8 @@ def main():
         start_epoch = ckpt['epoch']
         print(f"*********** Successfully continue searching form epoch {start_epoch}.*********** ")
     if (args.save_path / 'lossfunc_latest.pickle').exists():
-        print(f"*********** lossfunc: {lossfunc.loss_str(no_gumbel=True)}.*********** ")
-        lossfunc = utils.pickle_load(os.path.join(args.load_checkpoints, 'lossfunc_latest.pickle'))
+        lossfunc = utils.pickle_load(os.path.join(args.save, 'lossfunc_latest.pickle'))
+        wandb.config.update({"searched_loss_str": lossfunc.loss_str(no_gumbel=True)}, allow_val_change=True)
         print(f"*********** Successfully continue lossfunc: {lossfunc.loss_str(no_gumbel=True)}.*********** ")
 
     for epoch in range(start_epoch, args.search_epochs):
@@ -335,7 +335,7 @@ def main():
             'epoch': epoch + 1,
         }
         torch.save(state, os.path.join(args.save, 'search_latest.pt'))
-        utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'lossfunc_latest.pickle'))
+        utils.pickle_save(lossfunc, os.path.join(args.save, 'lossfunc_latest.pickle'))
         # update learning rate
         scheduler.step()
 
@@ -437,7 +437,7 @@ def main():
             print("[[{}] Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(args.device, epoch + 1, args.retrain_epochs,
                                                                                   retrain_test_pre_accuracy,
                                                                                   retrain_test_pre_ece))
-            utils.save(model, os.path.join(args.save, 'model-weights-retrain.pt'))
+
             # store search checkpoint
             state = {
                 'model': model.state_dict(),
@@ -475,11 +475,6 @@ if __name__ == '__main__':
     parser.add_argument('--lfs_learning_rate', type=float, default=1e-1, help='learning rate for arch encoding')
     parser.add_argument('--lfs_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
     parser.add_argument('--search_epochs', type=int, default=200, help='num of searching epochs')
-
-    # load setting
-    parser.add_argument('--load_model', type=str, default=None, help='load model weights from file')
-    parser.add_argument('--load_memory', type=str, default=None, help='load memory from file')
-    parser.add_argument('--load_checkpoints', action='store_true', default=False, help='use both model and memory')
 
     # loss func setting
     parser.add_argument('--tau', type=float, default=0.1, help='tau')
