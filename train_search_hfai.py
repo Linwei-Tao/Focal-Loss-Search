@@ -157,25 +157,20 @@ def main():
 
     # --- Part 1: model warm-up and build memory---
     # 1.1 model warm-up
-    if args.load_model is not None:
-        # load from file
-        model.load_state_dict(torch.load(os.path.join(args.save_path, 'model-weights-warm-up.pt')))
-        warm_up_gumbel = utils.pickle_load(os.path.join(args.save_path, 'gumbel-warm-up.pickle'))
-    else:
-        # 1.1.1 sample cells for warm-up
-        # load from checkpoint
-        warm_up_gumbel = []
-        if (args.save_path / 'gumbel_warmup_latest.pickle').exists():
-            warm_up_gumbel = utils.pickle_load(os.path.join(args.save, 'gumbel_warmup_latest.pickle'))
-            print(f"*********** Successfully continue gumbel warmup.*********** ")
+    # 1.1.1 sample cells for warm-up
+    # load from checkpoint
+    warm_up_gumbel = []
+    if (args.save_path / 'gumbel_warmup_latest.pickle').exists():
+        warm_up_gumbel = utils.pickle_load(os.path.join(args.save, 'gumbel_warmup_latest.pickle'))
+        print(f"*********** Successfully continue gumbel warmup.*********** ")
 
-        while len(warm_up_gumbel) <= args.warm_up_population:
-            g_ops = gumbel_like(lossfunc.alphas_ops)
-            flag, g_ops = loss_rejector.evaluate_loss(g_ops)
-            if flag:
-                warm_up_gumbel.append(g_ops)
-                print(f"GOT {len(warm_up_gumbel)} GOOD LOSS! {lossfunc.loss_str()}")
-                utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel_warmup_latest.pickle'))
+    while len(warm_up_gumbel) < args.warm_up_population:
+        g_ops = gumbel_like(lossfunc.alphas_ops)
+        flag, g_ops = loss_rejector.evaluate_loss(g_ops)
+        if flag:
+            warm_up_gumbel.append(g_ops)
+            print(f"GOT {len(warm_up_gumbel)} GOOD LOSS! {lossfunc.loss_str()}")
+            utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'gumbel_warmup_latest.pickle'))
 
 
     # 1.1.2 warm up model with proposed loss
@@ -208,55 +203,47 @@ def main():
         torch.save(state, os.path.join(args.save, 'warmup_latest.pt'))
 
     # 1.2 build memory (i.e. valid model)
-    if args.load_memory is not None:
-        print('Load valid model from {}'.format(args.load_model))
-        model.load_state_dict(torch.load(os.path.join(args.load_memory, 'model-weights-valid.pt')))
-        memory.load_state_dict(
-            utils.pickle_load(
-                os.path.join(args.load_memory, 'memory-warm-up.pickle')
-            )
-        )
-    else:
-        start_epoch = 0
-        if (args.save_path / 'buildmemory_latest.pt').exists():
-            ckpt = torch.load(args.save_path / 'buildmemory_latest.pt', map_location='cpu')
-            model.load_state_dict(ckpt['model'])
-            optimizer.load_state_dict(ckpt['optimizer'])
-            scheduler.load_state_dict(ckpt['scheduler'])
-            start_epoch = ckpt['epoch']
-            print(f"*********** Successfully continue build memory form epoch {start_epoch}.*********** ")
+    start_epoch = 0
+    if (args.save_path / 'buildmemory_latest.pt').exists():
+        ckpt = torch.load(args.save_path / 'buildmemory_latest.pt', map_location='cpu')
+        model.load_state_dict(ckpt['model'])
+        optimizer.load_state_dict(ckpt['optimizer'])
+        scheduler.load_state_dict(ckpt['scheduler'])
+        memory.load_state_dict(ckpt['memory'])
+        start_epoch = ckpt['epoch']
+        print(f"*********** Successfully continue build memory form epoch {start_epoch}.*********** ")
 
-        for epoch in range(start_epoch, len(warm_up_gumbel)):
-            # re-sample Gumbel distribution
-            lossfunc.g_ops = warm_up_gumbel[epoch]
-            # log function
-            print("Objective function: %s" % (lossfunc.loss_str()))
-            # train model for one step
-            model_train(train_queue, model, lossfunc, optimizer,
-                        name='Build Memory Epoch {}/{}'.format(epoch + 1, args.warm_up_population), args=args)
-            # valid model
-            pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, \
-            post_cece, post_nll = model_valid(valid_queue, valid_queue, model)
-            print('[Build Memory Epoch {}/{}] valid model-{} valid_nll={} valid_acc={} valid_ece={}'.format(epoch + 1,
-                                                                                                            args.warm_up_population,
-                                                                                                            epoch + 1,
-                                                                                                            pre_nll,
-                                                                                                            pre_accuracy,
-                                                                                                            pre_ece))
-            # save to memory
-            memory.append(weights=lossfunc.arch_weights(),
-                          nll=torch.tensor(pre_nll, dtype=torch.float32).to('cuda'),
-                          acc=torch.tensor(pre_accuracy, dtype=torch.float32).to('cuda'),
-                          ece=torch.tensor(pre_ece, dtype=torch.float32).to('cuda'))
-            # store Build Memory checkpoint
-            state = {
-                'model': model.state_dict(),
-                'memory': memory.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'scheduler': scheduler.state_dict(),
-                'epoch': epoch + 1,
-            }
-            torch.save(state, os.path.join(args.save, 'buildmemory_latest.pt'))
+    for epoch in range(start_epoch, len(warm_up_gumbel)):
+        # re-sample Gumbel distribution
+        lossfunc.g_ops = warm_up_gumbel[epoch]
+        # log function
+        print("Objective function: %s" % (lossfunc.loss_str()))
+        # train model for one step
+        model_train(train_queue, model, lossfunc, optimizer,
+                    name='Build Memory Epoch {}/{}'.format(epoch + 1, args.warm_up_population), args=args)
+        # valid model
+        pre_accuracy, pre_ece, pre_adaece, pre_cece, pre_nll, T_opt, post_ece, post_adaece, \
+        post_cece, post_nll = model_valid(valid_queue, valid_queue, model)
+        print('[Build Memory Epoch {}/{}] valid model-{} valid_nll={} valid_acc={} valid_ece={}'.format(epoch + 1,
+                                                                                                        args.warm_up_population,
+                                                                                                        epoch + 1,
+                                                                                                        pre_nll,
+                                                                                                        pre_accuracy,
+                                                                                                        pre_ece))
+        # save to memory
+        memory.append(weights=lossfunc.arch_weights(),
+                      nll=torch.tensor(pre_nll, dtype=torch.float32).to('cuda'),
+                      acc=torch.tensor(pre_accuracy, dtype=torch.float32).to('cuda'),
+                      ece=torch.tensor(pre_ece, dtype=torch.float32).to('cuda'))
+        # store Build Memory checkpoint
+        state = {
+            'model': model.state_dict(),
+            'memory': memory.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'epoch': epoch + 1,
+        }
+        torch.save(state, os.path.join(args.save, 'buildmemory_latest.pt'))
 
     # --- Part 2 predictor warm-up ---
     # -- build predictor --
@@ -313,9 +300,12 @@ def main():
         optimizer.load_state_dict(ckpt['optimizer'])
         scheduler.load_state_dict(ckpt['scheduler'])
         predictor.load_state_dict(ckpt['predictor'])
-        lossfunc.load_state_dict(ckpt['lossfunc'])
         start_epoch = ckpt['epoch']
         print(f"*********** Successfully continue searching form epoch {start_epoch}.*********** ")
+    if (args.save_path / 'lossfunc_latest.pickle').exists():
+        print(f"*********** lossfunc: {lossfunc.loss_str(no_gumbel=True)}.*********** ")
+        lossfunc = utils.pickle_load(os.path.join(args.load_checkpoints, 'lossfunc_latest.pickle'))
+        print(f"*********** Successfully continue lossfunc: {lossfunc.loss_str(no_gumbel=True)}.*********** ")
 
     for epoch in range(start_epoch, args.search_epochs):
         # search
@@ -326,7 +316,7 @@ def main():
 
         print("softmax(alpha_ops): ", F.softmax(lossfunc.alphas_ops, -1))
         print(f"alpha_ops loss: {lossfunc.loss_str(no_gumbel=True)}: ", lossfunc.alphas_ops)
-        wandb.config.update({"searched_loss_str": searched_loss_str}, allow_val_change=True)
+        wandb.config.update({"searched_loss_str": lossfunc.loss_str(no_gumbel=True)}, allow_val_change=True)
         wandb.log({
             "search_pre_valid_accuracy": pre_valid_accuracy * 100, "search_pre_valid_ece": pre_valid_ece * 100,
             "search_pre_valid_adaece": pre_valid_adaece * 100, "search_pre_valid_cece": pre_valid_cece * 100,
@@ -335,8 +325,6 @@ def main():
             "search_post_valid_adaece": post_valid_adaece * 100,
             "search_post_valid_cece": post_valid_cece * 100, "search_post_valid_nll": post_valid_nll * 100,
         }, step=epoch)
-        # save weights
-        utils.save(model, os.path.join(args.save, 'model-weights-search.pt'))
         # store search checkpoint
         state = {
             'model': model.state_dict(),
@@ -344,10 +332,10 @@ def main():
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict(),
             'predictor': lfs.predictor.state_dict(),
-            'lossfunc': lossfunc.state_dict(),
             'epoch': epoch + 1,
         }
         torch.save(state, os.path.join(args.save, 'search_latest.pt'))
+        utils.pickle_save(warm_up_gumbel, os.path.join(args.save, 'lossfunc_latest.pickle'))
         # update learning rate
         scheduler.step()
 
@@ -481,7 +469,7 @@ if __name__ == '__main__':
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
     parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
-    parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
+    parser.add_argument('--grad_clip', type=float, default=2, help='gradient clipping')
 
     # search setting
     parser.add_argument('--lfs_learning_rate', type=float, default=1e-1, help='learning rate for arch encoding')
@@ -527,10 +515,11 @@ if __name__ == '__main__':
     parser.add_argument('--platform', type=str, default='hfai')  # train_platform
 
     args, unknown_args = parser.parse_known_args()
-    try:
-        args.save = 'checkpoints/{}-{}'.format(os.environ["MARSV2_NB_NAME"], args.device)
-    except:
-        args.save = 'checkpoints/{}-{}'.format(1244, args.device)
+    # for local run
+    if args.platform=="local":
+        os.environ["MARSV2_NB_NAME"] = str(1235)
+
+    args.save = 'checkpoints/{}-{}'.format(os.environ["MARSV2_NB_NAME"], args.device)
 
 
     args.save_path = Path(args.save)
@@ -539,11 +528,6 @@ if __name__ == '__main__':
     # set current device
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device)
     os.environ['WANDB_MODE'] = args.wandb_mode
-
-    # load dir
-    if args.load_checkpoints:
-        args.load_model = 'checkpoints/n_states={}'.format(args.num_states)
-        args.load_memory = 'checkpoints/n_states={}'.format(args.num_states)
 
 
     args.retrain_epochs = 100 if args.dataset =='tiny_imagenet' else 350

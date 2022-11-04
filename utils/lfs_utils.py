@@ -33,8 +33,6 @@ def search(train_queue, valid_queue, model, lfs, lossfunc, loss_rejector, optimi
                   nll=torch.tensor(pre_nll, dtype=torch.float32).to('cuda'),
                   acc=torch.tensor(pre_accuracy, dtype=torch.float32).to('cuda'),
                   ece=torch.tensor(pre_ece, dtype=torch.float32).to('cuda'))
-    pickle_save(memory.state_dict(),
-                os.path.join(args.save, 'memory-search.pickle'))
 
     # -- predictor train --
     lfs.predictor.train()

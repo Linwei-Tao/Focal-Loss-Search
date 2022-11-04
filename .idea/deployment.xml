@@ -13,6 +13,13 @@
           </excludedPaths>
         </serverdata>
       </paths>
+      <paths name="Lab2">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/mnt/LFS" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
     </serverData>
     <option name="myAutoUpload" value="ALWAYS" />
   </component>
