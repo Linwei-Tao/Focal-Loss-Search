@@ -1,8 +1,8 @@
 #!/bin/bash
 
-################################################
-#      search train for cifar10 & cifar100     #
-################################################
+#################################################
+##      search train for cifar10 & cifar100     #
+#################################################
 
 N_STATES=(20 19 18 17 16 15 14)
 MODELS=("resnet50" "wide_resnet" "densenet121" "resnet110" )
@@ -14,7 +14,7 @@ for DATASET in "${DATASETS[@]}"
       do
         for NSTATE in "${N_STATES[@]}"
           do
-               hfai bash hfai_run.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain11041114_noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+               hfai bash hfai_run.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain11050540_noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
           done
       done
   done
@@ -26,7 +26,7 @@ for DATASET in "${DATASETS[@]}"
       do
         for NSTATE in "${N_STATES[@]}"
           do
-              hfai bash hfai_run_ceformat.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain11041114_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+              hfai bash hfai_run_ceformat.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain11050540_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
           done
       done
   done
@@ -38,7 +38,7 @@ for DATASET in "${DATASETS[@]}"
 
 
 #################################################
-##      search train for tiny-imagenet          #
+#      search train for tiny-imagenet           #
 #################################################
 
 N_STATES=(20 19 18 17 16 15 14)
@@ -52,7 +52,7 @@ for DATASET in "${DATASETS[@]}"
       do
         for NSTATE in "${N_STATES[@]}"
           do
-               hfai bash hfai_run.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain11041114_noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+               hfai bash hfai_run.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain11050540_noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
           done
       done
   done
@@ -64,7 +64,7 @@ for DATASET in "${DATASETS[@]}"
       do
         for NSTATE in "${N_STATES[@]}"
           do
-              hfai bash hfai_run_ceformat.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain11041114_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+              hfai bash hfai_run_ceformat.sh "${NSTATE}" "${MODEL}" "${DATASET}" -- -n 1 --force --no_diff --name Search_Retrain11050540_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
           done
       done
   done
@@ -78,10 +78,17 @@ for DATASET in "${DATASETS[@]}"
 ###      retrain on cifar10 and cifar100         #
 ##################################################
 #
-#CKPTS=(20 19 18 17 16 15 14)
+#CKPTS=()
 #
 #
 #for CKPT in "${CKPTS[@]}"
 #  do
-#       hfai bash hfai_run.sh "${CKPT}" -- -n 1 --force --no_diff --name Retrain_CIFAR11041114_CPKT="${CPKT}" --detach
+#       hfai bash hfai_run.sh "${CKPT}" -- -n 1 --force --no_diff --name Retrain_CIFAR11050540_CPKT="${CPKT}" --detach
 #  done
+
+
+##################################################
+###      retrain on cifar10 searched loss        #
+##################################################
+
+#hfai bash hfai_retrain_searched_loss.sh -- -n 1 --force --no_diff --name Retrain_SearchedLoss_GradClip --detach

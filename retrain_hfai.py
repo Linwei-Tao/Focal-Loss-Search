@@ -81,14 +81,24 @@ def main():
     print("args = %s", args)
 
     # --- load searched loss ---
-    if (checkpoint_path / 'lossfunc_latest.pickle').exists():
+    if args.load_checkpoints and (checkpoint_path / 'lossfunc_latest.pickle').exists():
         lossfunc = utils.pickle_load(os.path.join(args.load_checkpoints, 'lossfunc_latest.pickle'))
-        wandb.config.update({"searched_loss_str": lossfunc.loss_str(no_gumbel=True)}, allow_val_change=True)
+        wandb.config.update({
+            "searched_loss_str": lossfunc.loss_str(no_gumbel=True),
+            "num_states": lossfunc.num_states,
+            "noCEFormat": lossfunc.noCEFormat
+        }, allow_val_change=True)
+        print(f"*********** Successfully continue lossfunc: {lossfunc.loss_str(no_gumbel=True)}.*********** ")
+    elif args.load_searched_loss:
+        lossfunc = LossFunc(searched_loss=args.load_searched_loss)
+        wandb.config.update({
+            "searched_loss_str": lossfunc.loss_str(no_gumbel=True),
+            "num_states": lossfunc.num_states,
+            "noCEFormat": lossfunc.noCEFormat
+        }, allow_val_change=True)
         print(f"*********** Successfully continue lossfunc: {lossfunc.loss_str(no_gumbel=True)}.*********** ")
     else:
         print(f"No loss found!")
-
-
 
     # --- retrain on searched loss ---
     if args.retrain_epochs > 0:
@@ -105,7 +115,7 @@ def main():
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250],
                                                          gamma=0.1)
 
-        if args.dataset =='tiny_imagenet':
+        if args.dataset == 'tiny_imagenet':
             optimizer = torch.optim.SGD(model.parameters(),
                                         lr=0.1,
                                         momentum=0.9,
@@ -183,7 +193,8 @@ def main():
                 "retrain_test_post_nll": retrain_test_post_nll * 100,
             })
 
-            print("[[{}] Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(args.device, epoch + 1, args.retrain_epochs,
+            print("[[{}] Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(args.device, epoch + 1,
+                                                                                       args.retrain_epochs,
                                                                                        retrain_test_pre_accuracy,
                                                                                        retrain_test_pre_ece))
             # store search checkpoint
@@ -206,13 +217,13 @@ if __name__ == '__main__':
     parser.add_argument('--data', type=str, default='/data', help='location of the data corpus')
     parser.add_argument('--dataset', type=str, default='cifar10')
 
-
     # retrain
     parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
     parser.add_argument('--grad_clip', type=float, default=2, help='gradient clipping')
 
     # load setting
     parser.add_argument('--load_checkpoints', type=str, default=None)
+    parser.add_argument('--load_searched_loss', type=str, default=None)
 
     # others
     parser.add_argument('--seed', type=int, default=1, help='random seed')  # seed
@@ -222,29 +233,27 @@ if __name__ == '__main__':
 
     args, unknown_args = parser.parse_known_args()
     # for local run
-    if args.platform=="local":
-        os.environ["MARSV2_NB_NAME"] = str(2591)
+    if args.platform == "local":
+        os.environ["MARSV2_NB_NAME"] = str("retrain_test")
 
     args.save = 'checkpoints/{}-{}'.format(os.environ["MARSV2_NB_NAME"], args.device)
 
-
     args.save_path = Path(args.save)
     args.save_path.mkdir(exist_ok=True, parents=True)
-    checkpoint_path = Path(args.load_checkpoints)
+    if args.load_checkpoints:
+        checkpoint_path = Path(args.load_checkpoints)
 
     # set current device
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device)
     os.environ['WANDB_MODE'] = args.wandb_mode
 
-
     # load dir
-    args.retrain_epochs = 100 if args.dataset =='tiny_imagenet' else 350
-
+    args.retrain_epochs = 100 if args.dataset == 'tiny_imagenet' else 350
 
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device))
+    args.wandb_dir = "./wandb_local" if args.platform=="local" else "./wandb"
+    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args,
+               id="{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir)
 
     print("wandb.run.dir", wandb.run.dir)
     main()
-
-

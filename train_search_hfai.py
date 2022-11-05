@@ -469,7 +469,7 @@ if __name__ == '__main__':
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
     parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
-    parser.add_argument('--grad_clip', type=float, default=2, help='gradient clipping')
+    parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
 
     # search setting
     parser.add_argument('--lfs_learning_rate', type=float, default=1e-1, help='learning rate for arch encoding')
@@ -512,7 +512,7 @@ if __name__ == '__main__':
     args, unknown_args = parser.parse_known_args()
     # for local run
     if args.platform=="local":
-        os.environ["MARSV2_NB_NAME"] = str(1235)
+        os.environ["MARSV2_NB_NAME"] = str(80608)
 
     args.save = 'checkpoints/{}-{}'.format(os.environ["MARSV2_NB_NAME"], args.device)
 
@@ -529,7 +529,8 @@ if __name__ == '__main__':
 
 
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device))
+    args.wandb_dir = "./wandb_local" if args.platform=="local" else "./wandb"
+    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir)
 
     print("wandb.run.dir", wandb.run.dir)
     main()

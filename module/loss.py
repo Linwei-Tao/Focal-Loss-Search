@@ -3,7 +3,7 @@ from typing import Union, List
 import torch
 from torch import nn
 from module.operations import OPS
-from genotypes import PRIMITIVES
+from genotypes import PRIMITIVES, SEARCHED_LOSS
 from utils import gumbel_like, gumbel_softmax
 import torch.nn.functional as F
 
@@ -27,24 +27,31 @@ class MixedOp(nn.Module):
 
 class LossFunc(nn.Module):
 
-    def __init__(self, num_states=11, tau=0.1, noCEFormat=True):
+    def __init__(self, num_states=14, tau=0.1, noCEFormat=True, searched_loss=None):
         super(LossFunc, self).__init__()
         self.num_initial_state = 3  # 1, p_k, p_j
         self.states = []
         self.num_states = num_states
         self._tau = tau
         self.noCEFormat = noCEFormat
+        self.searched_loss = searched_loss
+        num_ops = len(PRIMITIVES)
+
+        # init architecture parameters alpha
+        if self.searched_loss:
+            self.alphas_ops = SEARCHED_LOSS[searched_loss]["alpha"].to('cuda')
+            self.num_states = SEARCHED_LOSS[searched_loss]["num_states"]
+            self.noCEFormat = SEARCHED_LOSS[searched_loss]["noCEFormat"]
+        else:
+            self.alphas_ops = (1e-3 * torch.randn(num_states, num_ops)).to('cuda').requires_grad_(True)
 
         self._ops = nn.ModuleList()
-        for i in range(num_states):
+        for i in range(self.num_states):
             op = MixedOp()
             self._ops.append(op)
 
         # operations number
-        num_ops = len(PRIMITIVES)
 
-        # init architecture parameters alpha
-        self.alphas_ops = (1e-3 * torch.randn(num_states, num_ops)).to('cuda').requires_grad_(True)
         # init Gumbel distribution for Gumbel softmax sampler
         self.g_ops = gumbel_like(self.alphas_ops)
 
