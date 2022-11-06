@@ -7,7 +7,18 @@ FILES=("wandb/wandb/offline-run-20221105_174249-Search_Retrain11050540_noCEForma
 for FILE in "${FILES[@]}"
   do
     hfai workspace download "${FILE}"
+  done
+
+for FILE in "${FILES[@]}"
+  do
     wandb sync "${FILE}"
+  done
+
+for FILE in "${FILES[@]}"
+  do
     rm -rf "${FILE}"
   done
+
+
+
 
