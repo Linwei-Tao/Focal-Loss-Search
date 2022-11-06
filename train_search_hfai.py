@@ -529,7 +529,7 @@ if __name__ == '__main__':
 
 
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    args.wandb_dir = "./wandb_local" if args.platform=="local" else "./wandb"
+    args.wandb_dir = "./wandb_local" if args.platform=="local" else None
     wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir)
 
     print("wandb.run.dir", wandb.run.dir)

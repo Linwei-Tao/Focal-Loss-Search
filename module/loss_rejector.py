@@ -58,7 +58,7 @@ class LossRejector(nn.Module):
         if not (loss_array.sort()[1] == logits_rank).sum() == logits_rank.shape[0]:
             return 0, None
 
-        # check3: optimization performance higher than a threhold
+        # check3: optimization performance higher than a threshold
         for step in range(self.steps):
             self.optimizer.zero_grad()
             loss, nll = self.lossfunc(learnable_logits, target)
