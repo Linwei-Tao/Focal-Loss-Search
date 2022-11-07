@@ -11,7 +11,6 @@ from torch.nn import functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, SubsetRandomSampler
 import torchvision
-import glob
 
 from module.loss_searcher import LFS
 from module.memory import Memory
@@ -325,6 +324,7 @@ def main():
             "search_post_valid_adaece": post_valid_adaece * 100,
             "search_post_valid_cece": post_valid_cece * 100, "search_post_valid_nll": post_valid_nll * 100,
         }, step=epoch)
+
         # store search checkpoint
         state = {
             'model': model.state_dict(),
@@ -434,9 +434,17 @@ def main():
                 "retrain_test_post_nll": retrain_test_post_nll * 100,
             })
 
-            print("[[{}] Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(args.device, epoch + 1, args.retrain_epochs,
-                                                                                  retrain_test_pre_accuracy,
-                                                                                  retrain_test_pre_ece))
+            print(f"[[{args.device}] Retrain Epoch: {epoch + 1}/{args.retrain_epochs}]  "
+                  f"retrain_test_pre_accuracy: {retrain_test_pre_accuracy * 100}  "
+                  f"retrain_test_pre_ece: {retrain_test_pre_ece * 100}  "
+                  f"retrain_test_pre_adaece: {retrain_test_pre_adaece * 100}  "
+                  f"retrain_test_pre_cece: {retrain_test_pre_cece * 100}  "
+                  f"retrain_test_pre_nll: {retrain_test_pre_nll * 100}  "
+                  f"retrain_test_T_opt: {retrain_test_T_opt}  "
+                  f"retrain_test_post_ece: {retrain_test_post_ece * 100}  "
+                  f"retrain_test_post_adaece: {retrain_test_post_adaece * 100}  "
+                  f"retrain_test_post_cece: {retrain_test_post_cece * 100}  "
+                  f"retrain_test_post_nll: {retrain_test_post_nll * 100}  ")
 
             # store search checkpoint
             state = {
@@ -512,7 +520,7 @@ if __name__ == '__main__':
     args, unknown_args = parser.parse_known_args()
     # for local run
     if args.platform=="local":
-        os.environ["MARSV2_NB_NAME"] = str(80608)
+        os.environ["MARSV2_NB_NAME"] = str(98)
 
     args.save = 'checkpoints/{}-{}'.format(os.environ["MARSV2_NB_NAME"], args.device)
 
@@ -529,10 +537,12 @@ if __name__ == '__main__':
 
 
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    args.wandb_dir = "./wandb_local" if args.platform=="local" else None
-    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir)
-
+    args.wandb_dir = "./wandb_test" if args.platform=="local" else None
+    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir, resume="allow")
     print("wandb.run.dir", wandb.run.dir)
     main()
 
-
+# wandb.run.dir ./wandb_test/wandb/offline-run-20221106_212417-18-0/files
+# wandb.run.dir /mnt/LFS/wandb/offline-run-20221106_212827-18-0/files
+# wandb.run.dir /mnt/LFS/wandb/offline-run-20221106_212855-18-0/files
+# wandb.run.dir ./wandb_test/wandb/offline-run-20221106_213312-30-1/files

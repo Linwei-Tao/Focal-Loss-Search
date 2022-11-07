@@ -202,6 +202,10 @@ def main():
 
     # --- Part 3 loss function search ---
     for epoch in range(args.search_epochs):
+        print(lossfunc.loss_str(no_gumbel=True))
+        print(lossfunc.alphas_ops)
+        print(F.softmax(lossfunc.alphas_ops,-1))
+
         # search
         pre_valid_accuracy, pre_valid_ece, pre_valid_adaece, pre_valid_cece, pre_valid_nll, T_opt, post_valid_ece, \
         post_valid_adaece, post_valid_cece, post_valid_nll, gumbel_loss_str, searched_loss_str = \
@@ -268,13 +272,16 @@ if __name__ == '__main__':
     parser.add_argument('--predictor_hidden_state', type=int, default=16, help='predictor hidden state')
     parser.add_argument('--predictor_batch_size', type=int, default=64, help='predictor batch size')
     parser.add_argument('--pred_learning_rate', type=float, default=1e-3, help='predictor learning rate')
+    parser.add_argument('--pred_weight_decay', type=float, default=1e-3, help='predictor learning rate')
     parser.add_argument('--memory_size', type=int, default=100, help='size of memory to train predictor')
     parser.add_argument('--warm_up_population', type=int, default=100, help='warm_up_population')
 
     # others
     parser.add_argument('--seed', type=int, default=1, help='random seed')
+    parser.add_argument('--device', type=int, default=0)
 
-    # loss function search
+
+# loss function search
     parser.add_argument('--operator_size', type=int, default=8)
     parser.add_argument('--loss_rejector_threshold', type=float, default=0.6, help='loss rejection threshold')
     parser.add_argument('--gumbel_scale', type=float, default=1, help='gumbel_scale')

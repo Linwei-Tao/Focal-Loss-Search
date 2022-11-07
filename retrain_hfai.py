@@ -80,6 +80,7 @@ def main():
 
     print("args = %s", args)
 
+
     # --- load searched loss ---
     if args.load_checkpoints and (checkpoint_path / 'lossfunc_latest.pickle').exists():
         lossfunc = utils.pickle_load(os.path.join(args.load_checkpoints, 'lossfunc_latest.pickle'))
@@ -89,6 +90,7 @@ def main():
             "noCEFormat": lossfunc.noCEFormat
         }, allow_val_change=True)
         print(f"*********** Successfully continue lossfunc: {lossfunc.loss_str(no_gumbel=True)}.*********** ")
+        print(lossfunc.alphas_ops)
     elif args.load_searched_loss:
         lossfunc = LossFunc(searched_loss=args.load_searched_loss)
         wandb.config.update({
@@ -186,17 +188,26 @@ def main():
                 "retrain_test_pre_ece": retrain_test_pre_ece * 100,
                 "retrain_test_pre_adaece": retrain_test_pre_adaece * 100,
                 "retrain_test_pre_cece": retrain_test_pre_cece * 100,
-                "retrain_test_pre_nll": retrain_test_pre_nll * 100, "retrain_test_T_opt": retrain_test_T_opt,
+                "retrain_test_pre_nll": retrain_test_pre_nll * 100,
+                "retrain_test_T_opt": retrain_test_T_opt,
                 "retrain_test_post_ece": retrain_test_post_ece * 100,
                 "retrain_test_post_adaece": retrain_test_post_adaece * 100,
                 "retrain_test_post_cece": retrain_test_post_cece * 100,
                 "retrain_test_post_nll": retrain_test_post_nll * 100,
             })
 
-            print("[[{}] Retrain Epoch: {}/{}] Test Accuracy: {}, Test ECE: {}".format(args.device, epoch + 1,
-                                                                                       args.retrain_epochs,
-                                                                                       retrain_test_pre_accuracy,
-                                                                                       retrain_test_pre_ece))
+            print(f"[[{args.device}] Retrain Epoch: {epoch + 1}/{args.retrain_epochs}]  "
+                  f"retrain_test_pre_accuracy: {retrain_test_pre_accuracy * 100}  "
+                  f"retrain_test_pre_ece: {retrain_test_pre_ece * 100}  "
+                  f"retrain_test_pre_adaece: {retrain_test_pre_adaece * 100}  "
+                  f"retrain_test_pre_cece: {retrain_test_pre_cece * 100}  "
+                  f"retrain_test_pre_nll: {retrain_test_pre_nll * 100}  "
+                  f"retrain_test_T_opt: {retrain_test_T_opt}  "
+                  f"retrain_test_post_ece: {retrain_test_post_ece * 100}  "
+                  f"retrain_test_post_adaece: {retrain_test_post_adaece * 100}  "
+                  f"retrain_test_post_cece: {retrain_test_post_cece * 100}  "
+                  f"retrain_test_post_nll: {retrain_test_post_nll * 100}  ")
+
             # store search checkpoint
             state = {
                 'model': model.state_dict(),
@@ -219,7 +230,7 @@ if __name__ == '__main__':
 
     # retrain
     parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
-    parser.add_argument('--grad_clip', type=float, default=2, help='gradient clipping')
+    parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
 
     # load setting
     parser.add_argument('--load_checkpoints', type=str, default=None)
@@ -251,9 +262,9 @@ if __name__ == '__main__':
     args.retrain_epochs = 100 if args.dataset == 'tiny_imagenet' else 350
 
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    args.wandb_dir = "./wandb_local" if args.platform=="local" else "./wandb"
+    args.wandb_dir = "./wandb_local" if args.platform == "local" else None
     wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args,
-               id="{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir)
+               id="{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir, resume="allow")
 
     print("wandb.run.dir", wandb.run.dir)
     main()

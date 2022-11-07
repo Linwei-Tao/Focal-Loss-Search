@@ -28,6 +28,10 @@ class LFS(object):
         self.predictor_optimizer = torch.optim.Adam(
             self.predictor.parameters(), lr=pred_learning_rate, betas=(0.5, 0.999)
         )
+
+        # self.predictor_optimizer = torch.optim.SGD(
+        #     self.predictor.parameters(), lr=pred_learning_rate
+        # )
         self.predictor_criterion = predictor_criterion
 
 
