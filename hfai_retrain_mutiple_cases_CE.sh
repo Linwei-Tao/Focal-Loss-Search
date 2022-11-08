@@ -19,7 +19,7 @@ DATASET=$3
 DEVICE=$4
 
 
-python retrain_hfai.py --device=0 --data=hfai --model=--dataset=tiny_imagenet  --model=resnet50_ti --wandb_mode=offline --load_checkpoints=checkpoints/Search_Retrain11050540_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}"-"${DEVICE}" &
+python retrain_hfai.py --device=0 --data=hfai --model=resnet50_ti --dataset=tiny_imagenet --wandb_mode=offline --load_checkpoints=checkpoints/Search_Retrain11050540_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}"-"${DEVICE}" &
 python retrain_hfai.py --device=1 --data=hfai --model=resnet110 --dataset=cifar10 --wandb_mode=offline --load_checkpoints=checkpoints/Search_Retrain11050540_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}"-"${DEVICE}" &
 python retrain_hfai.py --device=2 --data=hfai --model=wide_resnet --dataset=cifar10 --wandb_mode=offline --load_checkpoints=checkpoints/Search_Retrain11050540_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}"-"${DEVICE}" &
 python retrain_hfai.py --device=3 --data=hfai --model=densenet121 --dataset=cifar10 --wandb_mode=offline --load_checkpoints=checkpoints/Search_Retrain11050540_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}"-"${DEVICE}" &

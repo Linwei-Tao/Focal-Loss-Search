@@ -56,7 +56,7 @@ def _populate_bins(confs, preds, labels, num_bins=10):
     return bin_dict
 
 
-def reliability_plot(confs, preds, labels, num_bins=15):
+def reliability_plot(confs, preds, labels, num_bins=15, save=False):
     '''
     Method to draw a reliability plot from a model's predictions and confidences.
     '''
@@ -72,10 +72,13 @@ def reliability_plot(confs, preds, labels, num_bins=15):
     plt.ylabel('Accuracy')
     plt.xlabel('Confidence')
     plt.legend()
+    if save:
+        plt.savefig(save)
     plt.show()
 
 
-def bin_strength_plot(confs, preds, labels, num_bins=15):
+
+def bin_strength_plot(confs, preds, labels, num_bins=15, save=False):
     '''
     Method to draw a plot for the number of samples in each confidence bin.
     '''
@@ -91,4 +94,6 @@ def bin_strength_plot(confs, preds, labels, num_bins=15):
             color='blue', alpha=0.5, label='Percentage samples')
     plt.ylabel('Percentage of samples')
     plt.xlabel('Confidence')
+    if save:
+        plt.savefig(save)
     plt.show()

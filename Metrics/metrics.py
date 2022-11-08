@@ -132,6 +132,31 @@ def test_classification_net_logits(logits: object, labels: object) -> object:
     return confusion_matrix(labels_list, predictions_list), accuracy, labels_list, \
            predictions_list, confidence_vals_list
 
+def test_classification_net_focal(model, data_loader, device):
+    '''
+    This function reports classification accuracy and confusion matrix over a dataset.
+    '''
+    model.eval()
+    labels_list = []
+    predictions_list = []
+    confidence_vals_list = []
+    with torch.no_grad():
+        for i, (data, label) in enumerate(data_loader):
+            data = data.to(device)
+            label = label.to(device)
+
+            logits = model(data)
+            softmax = F.softmax(logits, dim=1)
+            confidence_vals, predictions = torch.max(softmax, dim=1)
+
+            labels_list.extend(label.cpu().numpy().tolist())
+            predictions_list.extend(predictions.cpu().numpy().tolist())
+            confidence_vals_list.extend(confidence_vals.cpu().numpy().tolist())
+    accuracy = accuracy_score(labels_list, predictions_list)
+
+    return confusion_matrix(labels_list, predictions_list), accuracy, labels_list, \
+           predictions_list, confidence_vals_list
+
 
 def test_classification_net(model, test_loader, val_loader, device):
     '''

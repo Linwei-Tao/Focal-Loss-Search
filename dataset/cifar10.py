@@ -11,7 +11,10 @@ import numpy as np
 from torchvision import datasets
 from torchvision import transforms
 from torch.utils.data.sampler import SubsetRandomSampler
-import hfai
+try:
+    import hfai
+except:
+    pass
 
 
 def get_train_valid_loader(batch_size,

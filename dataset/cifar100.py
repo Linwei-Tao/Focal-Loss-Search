@@ -7,7 +7,10 @@ Test set size: 10000
 
 import torch
 import numpy as np
-import hfai
+try:
+    import hfai
+except:
+    pass
 
 from torchvision import datasets
 from torchvision import transforms

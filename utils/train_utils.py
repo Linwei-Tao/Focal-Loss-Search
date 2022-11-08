@@ -1,7 +1,5 @@
 import torch.nn as nn
 import utils
-import hfai
-import torch
 
 
 def model_train(train_queue, model, lossfunc, optimizer, name, args, gumbel_training=True):

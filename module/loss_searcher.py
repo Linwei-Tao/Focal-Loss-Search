@@ -2,6 +2,7 @@ import torch
 
 from torch.nn import functional as F
 
+
 class LFS(object):
 
     def __init__(self, lossfunc, model, momentum, weight_decay,
@@ -22,18 +23,14 @@ class LFS(object):
             self.lossfunc.arch_parameters(), lr=lfs_learning_rate, betas=(0.5, 0.999),
             weight_decay=lfs_weight_decay
         )
+
         self.lfs_criterion = lfs_criterion
 
         # predictor optimization
         self.predictor_optimizer = torch.optim.Adam(
             self.predictor.parameters(), lr=pred_learning_rate, betas=(0.5, 0.999)
         )
-
-        # self.predictor_optimizer = torch.optim.SGD(
-        #     self.predictor.parameters(), lr=pred_learning_rate
-        # )
         self.predictor_criterion = predictor_criterion
-
 
     def predictor_step(self, x, y):
         # clear prev gradient
@@ -45,6 +42,7 @@ class LFS(object):
         # back-prop and optimization step
         loss.backward(retain_graph=True)
         self.predictor_optimizer.step()
+        self.predictor_optimizer.zero_grad()
         return y_pred, loss
 
     def step(self):
@@ -52,13 +50,14 @@ class LFS(object):
         loss, y_pred = self._backward_step()
         loss.backward(retain_graph=True)
         self.lfs_optimizer.step()
+        self.lfs_optimizer.zero_grad()
         return loss, y_pred
 
     def _backward_step(self):
         y_pred = self.predictor(self.lossfunc.arch_weights().unsqueeze(0))
         if self.predictor.num_obj > 1:
             target = torch.ones_like(y_pred)
-            target[:,1] = 0
+            target[:, 1] = 0
         else:
             target = torch.zeros_like(y_pred)
         loss = self.lfs_criterion(y_pred, target)
