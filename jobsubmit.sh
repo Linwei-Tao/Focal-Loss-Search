@@ -190,7 +190,7 @@ for DATASET in "${DATASETS[@]}"
           do
             for NSTATE in "${N_STATES[@]}"
               do
-                   hfai bash hfai_retrain_mutiple_cases_tiny_imagenet.sh "${NSTATE}" "${MODEL}" "${DATASET}" "${DEVICE}" -- -n 1 --force --no_diff --name RetrainTinyImagenet11050540_noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+                   hfai bash hfai_retrain_mutiple_cases_tiny_imagenet.sh "${NSTATE}" "${MODEL}" "${DATASET}" "${DEVICE}" -- -n 1 --force --no_diff --name RetrainTinyImagenet11091044_noCEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
               done
           done
       done
@@ -205,7 +205,7 @@ for DATASET in "${DATASETS[@]}"
           do
             for NSTATE in "${N_STATES[@]}"
               do
-                   hfai bash hfai_retrain_mutiple_cases_tiny_imagenet_CE.sh "${NSTATE}" "${MODEL}" "${DATASET}" "${DEVICE}" -- -n 1 --force --no_diff --name RetrainTinyImagenet11050540_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
+                   hfai bash hfai_retrain_mutiple_cases_tiny_imagenet_CE.sh "${NSTATE}" "${MODEL}" "${DATASET}" "${DEVICE}" -- -n 1 --force --no_diff --name RetrainTinyImagenet11091044_CEFormat_"${DATASET}"_"${MODEL}"_num_states="${NSTATE}" --detach
               done
           done
       done

@@ -245,7 +245,7 @@ if __name__ == '__main__':
     args, unknown_args = parser.parse_known_args()
     # for local run
     if args.platform == "local":
-        os.environ["MARSV2_NB_NAME"] = str("retrain_test")
+        os.environ["MARSV2_NB_NAME"] = str("12516")
 
     args.save = 'checkpoints/{}-{}'.format(os.environ["MARSV2_NB_NAME"], args.device)
 
@@ -262,8 +262,9 @@ if __name__ == '__main__':
     args.retrain_epochs = 100 if args.dataset == 'tiny_imagenet' else 350
 
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    args.wandb_dir = "./wandb_local" if args.platform == "local" else None
-    wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args,
+    args.wandb_dir = "./wandb_local" if args.platform == "local" else f"./wandb/{os.environ['MARSV2_NB_NAME']}"
+    Path(args.wandb_dir).mkdir(parents=True, exist_ok=True)
+    wandb.init(project="Focal Loss Sdearch Calibration", entity="linweitao", config=args,
                id="{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir, resume="allow")
 
     print("wandb.run.dir", wandb.run.dir)

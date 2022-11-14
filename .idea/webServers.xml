@@ -2,7 +2,7 @@
 <project version="4">
   <component name="WebServers">
     <option name="servers">
-      <webServer id="12046b95-9c80-48ca-87f5-0f310a72cebc" name="Lab2">
+      <webServer id="12046b95-9c80-48ca-87f5-0f310a72cebc" name="Lab2 (project level)">
         <fileTransfer accessType="SFTP" sshConfigId="92403b61-2d7e-41d4-b497-5ec6f2b1497c" sshConfig="Lab2">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />

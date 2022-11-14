@@ -13,7 +13,7 @@
           </excludedPaths>
         </serverdata>
       </paths>
-      <paths name="Lab2">
+      <paths name="Lab2 (project level)">
         <serverdata>
           <mappings>
             <mapping deploy="/mnt/LFS" local="$PROJECT_DIR$" web="/" />

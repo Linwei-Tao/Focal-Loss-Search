@@ -1,5 +1,7 @@
 import torch.nn as nn
+import torch.nn.functional as F
 import utils
+import torch
 
 
 def model_train(train_queue, model, lossfunc, optimizer, name, args, gumbel_training=True):
@@ -21,7 +23,7 @@ def model_train(train_queue, model, lossfunc, optimizer, name, args, gumbel_trai
         # forward
         optimizer.zero_grad()
         logits = model(x)
-        nll, loss = lossfunc(logits, target, gumbel_training=gumbel_training)
+        loss, nll = lossfunc(logits, target, gumbel_training=gumbel_training)
         # backward
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)

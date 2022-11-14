@@ -3,3 +3,5 @@
 /dataset/tiny-imagenet-200/
 /__pycache__/
 /exp_figs/
+/wandb/
+wandb*

@@ -70,12 +70,14 @@ models = {
 
 def main():
     # set random seeds
-    cudnn.deterministic = False
-    cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
     cudnn.enabled = True
     np.random.seed(args.seed)  # set random seed: numpy
     torch.manual_seed(args.seed)  # set random seed: torch
     torch.cuda.manual_seed(args.seed)  # set random seed: torch.cuda
+
+
 
     print("args = %s", args)
 
@@ -147,6 +149,8 @@ def main():
     # loss function
     lossfunc = LossFunc(num_states=args.num_states, tau=args.tau, noCEFormat=args.noCEFormat)
 
+
+    test_model =
     # a loss evaluator that filter unpromising loss function
     loss_rejector = LossRejector(lossfunc, train_queue, model, num_rejection_sample=5,
                                  threshold=args.loss_rejector_threshold)
@@ -520,7 +524,7 @@ if __name__ == '__main__':
     args, unknown_args = parser.parse_known_args()
     # for local run
     if args.platform=="local":
-        os.environ["MARSV2_NB_NAME"] = str(98)
+        os.environ["MARSV2_NB_NAME"] = str(2)
 
     args.save = 'checkpoints/{}-{}'.format(os.environ["MARSV2_NB_NAME"], args.device)
 
@@ -537,7 +541,8 @@ if __name__ == '__main__':
 
 
     wandb.login(key="960eed671fd0ffd9b830069eb2b49e77af2e73f2")
-    args.wandb_dir = "./wandb_test" if args.platform=="local" else None
+    args.wandb_dir = "./wandb_local" if args.platform == "local" else f"./wandb/{os.environ['MARSV2_NB_NAME']}"
+    Path(args.wandb_dir).mkdir(parents=True, exist_ok=True)
     wandb.init(project="Focal Loss Search Calibration", entity="linweitao", config=args, id = "{}-{}".format(os.environ["MARSV2_NB_NAME"], args.device), dir=args.wandb_dir, resume="allow")
     print("wandb.run.dir", wandb.run.dir)
     main()
